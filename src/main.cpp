@@ -1,14 +1,9 @@
+#include <WiFi.h>
 #include <Arduino.h>
 #include <TinyGPS++.h>
 
 HardwareSerial SerialGPS(1);
 TinyGPSPlus GPS;
-
-void setup()
-{
-    Serial.begin(115200);
-    SerialGPS.begin(9600, SERIAL_8N1, 17, 18);
-}
 
 #pragma region GPS
 bool DadosGPSAtualizados()
@@ -61,9 +56,38 @@ void ImprimirLocalizacaoInvalida()
     Serial.println("--------------------");
 }
 #pragma endregion
+#pragma region WiFi
+const char* ssid = "brisa-565076";
+const char* senha = "blmwfgh5";
+bool WiFiJaConectado = false;
+
+void VerificarConexaoWiFi()
+{
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        if(!WiFiJaConectado)
+        {
+            WiFiJaConectado = true;
+            Serial.println("Wifi Conectado!");
+        }
+    }
+    else
+    {
+        WiFiJaConectado = false;
+    }
+} 
+#pragma endregion
+
+void setup()
+{
+    Serial.begin(115200);
+    WiFi.begin(ssid, senha);
+    SerialGPS.begin(9600, SERIAL_8N1, 17, 18);
+}
 
 void loop()
 {
+    VerificarConexaoWiFi();
     LerGPS();
     if (DadosGPSAtualizados())
     {
