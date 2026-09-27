@@ -11,8 +11,15 @@ void setup()
 }
 
 #pragma region GPS
-struct DadosGPS //struct provisória enquanto o contrato com o WebService não é definido.
-                //contém os principais dados do GPS; será ajustada após a definição do contrato.
+bool DadosGPSAtualizados()
+{
+   return GPS.satellites.isUpdated();//verifica atualização de satélite pois é a ultima informação que o gps atualiza
+}
+bool LocalizacaoValida()
+{
+   return GPS.location.isValid();
+}
+struct DadosGPS /*struct provisória enquanto o contrato com o WebService não é definido. contém os principais dados do GPS; será ajustada após a definição do contrato.*/
 {
     uint8_t satelites;
     double latitude;
@@ -34,7 +41,7 @@ void LerGPS()
         GPS.encode(SerialGPS.read());
     }
 }
-void GPSDisponivel()
+void ImprimirLocalizacaoValida()
 {
     Serial.print("Satélites: ");
     Serial.println(dadosGPS.satelites);
@@ -46,7 +53,7 @@ void GPSDisponivel()
     Serial.println(dadosGPS.hdop);
     Serial.println("--------------------");
 }
-void GPSIndisponivel()
+void ImprimirLocalizacaoInvalida()
 {
     Serial.print("Satélites: ");
     Serial.println(dadosGPS.satelites);
@@ -58,16 +65,16 @@ void GPSIndisponivel()
 void loop()
 {
     LerGPS();
-    if (GPS.satellites.isUpdated())
+    if (DadosGPSAtualizados())
     {
         ObterDadosGPS();
-        if(GPS.location.isValid())
+        if(LocalizacaoValida())
         {
-            GPSDisponivel();
+            ImprimirLocalizacaoValida();
         }
         else
         {
-            GPSIndisponivel();
+            ImprimirLocalizacaoInvalida();
         }
     }
 }
