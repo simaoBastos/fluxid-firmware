@@ -11,6 +11,22 @@ void setup()
 }
 
 #pragma region GPS
+struct DadosGPS //struct provisória enquanto o contrato com o WebService não é definido.
+                //contém os principais dados do GPS; será ajustada após a definição do contrato.
+{
+    uint8_t satelites;
+    double latitude;
+    double longitude;
+    double hdop;
+};
+DadosGPS dadosGPS;
+void ObterDadosGPS() 
+{
+    dadosGPS.satelites = GPS.satellites.value();
+    dadosGPS.latitude = GPS.location.lat();
+    dadosGPS.longitude = GPS.location.lng();
+    dadosGPS.hdop = GPS.hdop.hdop();
+}
 void LerGPS()
 {
     while (SerialGPS.available() > 0)
@@ -21,19 +37,19 @@ void LerGPS()
 void GPSDisponivel()
 {
     Serial.print("Satélites: ");
-    Serial.println(GPS.satellites.value());
+    Serial.println(dadosGPS.satelites);
     Serial.print("Latitude: ");
-    Serial.println(GPS.location.lat(), 6);
+    Serial.println(dadosGPS.latitude, 6);
     Serial.print("Longitude: ");
-    Serial.println(GPS.location.lng(), 6);
+    Serial.println(dadosGPS.longitude, 6);
     Serial.print("HDOP: ");
-    Serial.println(GPS.hdop.hdop());
+    Serial.println(dadosGPS.hdop);
     Serial.println("--------------------");
 }
 void GPSIndisponivel()
 {
     Serial.print("Satélites: ");
-    Serial.println(GPS.satellites.value());
+    Serial.println(dadosGPS.satelites);
     Serial.println("Tentando fix...");
     Serial.println("--------------------");
 }
@@ -44,6 +60,7 @@ void loop()
     LerGPS();
     if (GPS.satellites.isUpdated())
     {
+        ObterDadosGPS();
         if(GPS.location.isValid())
         {
             GPSDisponivel();
