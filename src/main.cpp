@@ -1,9 +1,13 @@
 #include <WiFi.h>
 #include <Arduino.h>
 #include <TinyGPS++.h>
+#include <ArduinoJson.h>
 
 HardwareSerial SerialGPS(1);
 TinyGPSPlus GPS;
+
+String MontarJson();
+
 
 #pragma region GPS
 bool DadosGPSAtualizados()
@@ -38,15 +42,7 @@ void LerGPS()
 }
 void ImprimirLocalizacaoValida()
 {
-    Serial.print("Satélites: ");
-    Serial.println(dadosGPS.satelites);
-    Serial.print("Latitude: ");
-    Serial.println(dadosGPS.latitude, 6);
-    Serial.print("Longitude: ");
-    Serial.println(dadosGPS.longitude, 6);
-    Serial.print("HDOP: ");
-    Serial.println(dadosGPS.hdop);
-    Serial.println("--------------------");
+    Serial.println(MontarJson());
 }
 void ImprimirLocalizacaoInvalida()
 {
@@ -76,6 +72,21 @@ void VerificarConexaoWiFi()
         WiFiJaConectado = false;
     }
 } 
+#pragma endregion
+#pragma region JSON
+String MontarJson() // estrutura provisória baseada na struct "DadosGPS"
+{
+    JsonDocument doc;
+
+    doc["satelites"] = dadosGPS.satelites;
+    doc["latitude"] = dadosGPS.latitude;
+    doc["longitude"] = dadosGPS.longitude;
+    doc["hdop"] = dadosGPS.hdop;
+
+    String dados;
+    serializeJson(doc, dados);
+    return dados;
+}
 #pragma endregion
 
 void setup()
