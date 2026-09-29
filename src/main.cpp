@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <TinyGPS++.h>
 #include <ArduinoJson.h>
+// #include <HTTPClient.h>
 
 HardwareSerial SerialGPS(1);
 TinyGPSPlus GPS;
@@ -40,10 +41,6 @@ void LerGPS()
         GPS.encode(SerialGPS.read());
     }
 }
-void ImprimirLocalizacaoValida()
-{
-    Serial.println(MontarJson());
-}
 void ImprimirLocalizacaoInvalida()
 {
     Serial.print("Satélites: ");
@@ -79,13 +76,50 @@ String MontarJson() // estrutura provisória baseada na struct "DadosGPS"
     JsonDocument doc;
 
     doc["satelites"] = dadosGPS.satelites;
-    doc["latitude"] = dadosGPS.latitude;
-    doc["longitude"] = dadosGPS.longitude;
+    doc["latitude"] = round(dadosGPS.latitude * 1000000.0) / 1000000.0;
+    doc["longitude"] = round(dadosGPS.longitude * 1000000.0) / 1000000.0;
     doc["hdop"] = dadosGPS.hdop;
 
     String dados;
     serializeJson(doc, dados);
     return dados;
+}
+#pragma endregion
+#pragma region HTTP
+void EnviarDados()
+{
+    /*
+     * HTTP provisoriamente desativado enquanto o contrato
+     * ESP32 <-> WebService não estiver definido.
+     */
+
+    // HTTPClient Http;
+    // String url = "";
+    // Http.begin(url);
+
+    // Http.addHeader("Content-Type","application/json");
+
+    String dados = MontarJson();
+
+    Serial.print("Dados para envio: ");
+    Serial.println(dados);
+    
+    // int codigo = Http.POST(dados);
+
+    // switch (codigo)
+    // {
+    // case 200:
+    //     Serial.print("Requisição realizada com sucesso! - ");
+    //     Serial.println(codigo);
+    //     break;
+    
+    // default:
+    //     Serial.print("Código inválido - ");
+    //     Serial.println(codigo);
+    //     break;
+    // }
+
+    // Http.end();
 }
 #pragma endregion
 
@@ -105,7 +139,7 @@ void loop()
         ObterDadosGPS();
         if(LocalizacaoValida())
         {
-            ImprimirLocalizacaoValida();
+            EnviarDados();
         }
         else
         {
