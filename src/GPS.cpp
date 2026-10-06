@@ -5,9 +5,9 @@ TinyGPSPlus GPS;
 
 DadosGPS dadosGPS;
 
-void InicializarGPS(int8_t rxPin, int8_t txPin)
+void InicializarGPS(int8_t pinoRX, int8_t pinoTX)
 {
-    SerialGPS.begin(9600, SERIAL_8N1, rxPin, txPin);
+    SerialGPS.begin(9600, SERIAL_8N1, pinoRX, pinoTX);
 }
 
 bool DadosGPSAtualizados()
