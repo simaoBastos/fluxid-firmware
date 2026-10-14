@@ -1,3 +1,3 @@
 #include <Estado.h>
 
-EstadoDispositivo estadoAtual = NAO_CADASTRADO;
+EstadoDispositivo estadoAtual = OPERACIONAL;

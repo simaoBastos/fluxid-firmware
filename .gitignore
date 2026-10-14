@@ -3,3 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Configuracao local. Nunca versionar credenciais ou identificadores provisionados.
+include/secrets.h

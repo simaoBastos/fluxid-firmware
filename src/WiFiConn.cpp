@@ -1,13 +1,12 @@
 #include <Arduino.h>
 #include <WiFiConn.h>
+#include <secrets.h>
 
-const char* ssid = "brisa-565076";
-const char* senha = "blmwfgh5";
 bool WiFiJaConectado = false;
 
 void InicializarWiFi()
 {
-    WiFi.begin(ssid, senha);
+    WiFi.begin(FLUXID_WIFI_SSID, FLUXID_WIFI_PASSWORD);
 }
 
 void VerificarConexaoWiFi()

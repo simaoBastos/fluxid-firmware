@@ -1,9 +1,9 @@
-#include <GPS.h>
+﻿#include <GPS.h>
 
 HardwareSerial SerialGPS(1);
 TinyGPSPlus GPS;
 
-DadosGPS dadosGPS;
+DadosTelemetria dadosTelemetria;
 
 void InicializarGPS(int8_t pinoRX, int8_t pinoTX)
 {
@@ -12,20 +12,38 @@ void InicializarGPS(int8_t pinoRX, int8_t pinoTX)
 
 bool DadosGPSAtualizados()
 {
-   return GPS.satellites.isUpdated();//verifica atualização de satélite pois é a ultima informação que o gps atualiza
-}
-bool LocalizacaoValida()
-{
-   return GPS.location.isValid();
+    // Mantemos o gatilho original do projeto.
+    return GPS.satellites.isUpdated();
 }
 
-void ObterDadosGPS() 
+bool LocalizacaoValida()
 {
-    dadosGPS.satelites = GPS.satellites.value();
-    dadosGPS.latitude = GPS.location.lat();
-    dadosGPS.longitude = GPS.location.lng();
-    dadosGPS.hdop = GPS.hdop.hdop();
+    return dadosTelemetria.tem_posicao_valida;
 }
+
+void ObterDadosGPS()
+{
+    dadosTelemetria.satellites = GPS.satellites.value();
+    dadosTelemetria.hdop = GPS.hdop.hdop();
+
+    // Só atualiza as coordenadas se a posição for válida
+    // e tiver sido recebida recentemente.
+    if (GPS.location.isValid() && GPS.location.age() <= 5000)
+    {
+        dadosTelemetria.latitude = GPS.location.lat();
+        dadosTelemetria.longitude = GPS.location.lng();
+        dadosTelemetria.speed_kmh = GPS.speed.kmph();
+
+        dadosTelemetria.gps_ok = true;
+        dadosTelemetria.tem_posicao_valida = true;
+    }
+    else
+    {
+        // Preserva a última posição conhecida.
+        dadosTelemetria.gps_ok = false;
+    }
+}
+
 void LerGPS()
 {
     while (SerialGPS.available() > 0)
@@ -33,10 +51,9 @@ void LerGPS()
         GPS.encode(SerialGPS.read());
     }
 }
+
 void ImprimirLocalizacaoInvalida()
 {
-    Serial.print("Satélites: ");
-    Serial.println(dadosGPS.satelites);
-    Serial.println("Tentando fix...");
+    Serial.println("Aguardando primeira posicao GPS valida...");
     Serial.println("--------------------");
 }

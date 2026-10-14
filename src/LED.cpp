@@ -6,7 +6,7 @@ uint8_t ledVerde;
 uint8_t ledVermelho;
 bool ledVerdeLigado = false;
 bool ledVermelhoLigado = false;
-uint32_t ultimoTempo = 0;
+uint32_t ultimoEnvioLED = 0;
 
 enum SimbolosCodigo
 {
@@ -28,26 +28,26 @@ uint32_t agora = millis();
 
     if (ledVerdeLigado)
     {
-        if (agora - ultimoTempo >= tempoLigado)
+        if (agora - ultimoEnvioLED >= tempoLigado)
         {
             digitalWrite(ledVerde, LOW);
 
             ledVerdeLigado = false;
             
         
-            ultimoTempo = agora;
+            ultimoEnvioLED = agora;
         }
         
     }
     else
     {
-        if (agora - ultimoTempo >= tempoDesligado)
+        if (agora - ultimoEnvioLED >= tempoDesligado)
         {
             digitalWrite(ledVerde, HIGH);
             
             ledVerdeLigado = true;
         
-            ultimoTempo = agora;
+            ultimoEnvioLED = agora;
         }
     }
 }
@@ -59,16 +59,16 @@ uint32_t agora = millis();
 
     if (indiceAtual >= sizeof(erro1)/sizeof(erro1[0]))
     {
-        if (agora-ultimoTempo >= INTERVALO_CODIGO) indiceAtual = 0;
+        if (agora-ultimoEnvioLED >= INTERVALO_CODIGO) indiceAtual = 0;
         return;
     }
 
     if (!ledVermelhoLigado)
     {
-        if (agora-ultimoTempo >= INTERVALO_SIMBOLOS)
+        if (agora-ultimoEnvioLED >= INTERVALO_SIMBOLOS)
         {
             ledVermelhoLigado = true;        
-            ultimoTempo = agora;
+            ultimoEnvioLED = agora;
             return;
         }
     }
@@ -76,20 +76,20 @@ uint32_t agora = millis();
     switch (erro1[indiceAtual])
     {
     case CURTO:
-        if (ledVermelhoLigado && agora-ultimoTempo>=TEMPO_CURTO)
+        if (ledVermelhoLigado && agora-ultimoEnvioLED>=TEMPO_CURTO)
         {
             ledVermelhoLigado = false;
             indiceAtual++;
-            ultimoTempo = agora;
+            ultimoEnvioLED = agora;
         }
             break;
 
     case LONGO:
-        if (ledVermelhoLigado && agora-ultimoTempo>=TEMPO_LONGO)
+        if (ledVermelhoLigado && agora-ultimoEnvioLED>=TEMPO_LONGO)
         {
             ledVermelhoLigado = false;
             indiceAtual++;
-            ultimoTempo = agora;
+            ultimoEnvioLED = agora;
         }
         break;
 

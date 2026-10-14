@@ -3,15 +3,21 @@
 #include <Arduino.h>
 #include <TinyGPS++.h>
 
-struct DadosGPS /*struct provisória enquanto o contrato com o WebService não é definido. contém os principais dados do GPS; será ajustada após a definição do contrato.*/
+
+extern TinyGPSPlus GPS;
+
+struct DadosTelemetria /* contém os principais dados do GPS para a telemetria */
 {
-    uint8_t satelites;
+    uint8_t satellites;
     double latitude;
     double longitude;
+    double speed_kmh;
     double hdop;
+    bool gps_ok;           // true = posição atual válida; false = posição preservada (última válida)
+    bool tem_posicao_valida; // true após o primeiro fix válido; false antes do primeiro fix
 };
 
-extern DadosGPS dadosGPS;
+extern DadosTelemetria dadosTelemetria;
 
 void InicializarGPS(int8_t rxPin, int8_t txPin);
 bool DadosGPSAtualizados();
