@@ -98,6 +98,15 @@ namespace
         http.print(payload);
         http.endRequest();
 
+        Serial.println("POST enviado; aguardando resposta da API...");
+        Serial.print("Destino: http://");
+        Serial.print(endereco.host);
+        Serial.print(":");
+        Serial.print(endereco.porta);
+        Serial.println(caminho);
+        Serial.print("Tamanho do payload: ");
+        Serial.println(payload.length());
+
         int codigo = http.responseStatusCode();
 
         // Consome o corpo da resposta antes de encerrar a conexão.
@@ -117,11 +126,9 @@ namespace
     }
 }
 
-int EnviarDadosTelemetria()
+int EnviarDadosTelemetria(const String& payload)
 {
-    const uint8_t MAX_TENTATIVAS = 3;
-
-    String payload = MontarJsonTelemetria();
+    const uint8_t MAX_TENTATIVAS = 1;
 
     if (payload.isEmpty())
     {
@@ -233,4 +240,11 @@ int EnviarDadosTelemetria()
     }
 
     return -1;
+}
+
+int EnviarDadosTelemetria()
+{
+    return EnviarDadosTelemetria(
+        MontarJsonTelemetria()
+    );
 }

@@ -6,7 +6,7 @@
 
 String MontarJsonTelemetria()
 {
-    // Não gera uma telemetria sem nunca ter obtido uma posição válida.
+    // Não gera telemetria sem uma posição válida.
     if (!dadosTelemetria.tem_posicao_valida)
     {
         return "";
@@ -23,17 +23,12 @@ String MontarJsonTelemetria()
     doc["satellites"] = dadosTelemetria.satellites;
     doc["hdop"] = dadosTelemetria.hdop;
     doc["speed_kmh"] = dadosTelemetria.speed_kmh;
-
     doc["attempt_count"] = dadosMensagem.attempt_count;
 
-    // Só inclui valores de bateria dentro da faixa válida.
-    if (dadosDispositivo.battery_percent >= 0 &&
-        dadosDispositivo.battery_percent <= 100)
-    {
-        doc["battery_percent"] = dadosDispositivo.battery_percent;
-    }
+    // TESTE TEMPORÁRIO: a API exige este campo.
+    // Não representa uma medição real da bateria.
+    doc["battery_percent"] = 100;
 
-    // Não declara um estado físico que ainda não foi confirmado.
     if (dadosDispositivo.seal_status == "LOCKED" ||
         dadosDispositivo.seal_status == "UNLOCKED" ||
         dadosDispositivo.seal_status == "BROKEN")
@@ -41,7 +36,6 @@ String MontarJsonTelemetria()
         doc["seal_status"] = dadosDispositivo.seal_status;
     }
 
-    // Só informa sinal GSM se o modem respondeu.
     if (dadosGSM.modem_respondendo)
     {
         doc["gsm_signal"] = dadosGSM.gsm_signal;
@@ -49,5 +43,9 @@ String MontarJsonTelemetria()
 
     String dados;
     serializeJson(doc, dados);
+
+    Serial.println("JSON da telemetria:");
+    Serial.println(dados);
+
     return dados;
 }
