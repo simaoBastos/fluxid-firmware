@@ -42,3 +42,18 @@
 - `test/host/run_tests.ps1` (MSVC): 247 verificacoes, 0 falhas.
 - O teste simulado de persistencia da fila nao foi feito (exigiria simular `String`, LittleFS e `Preferences`).
 - Nenhum teste de placa, GPS, Wi-Fi, API real ou SIM800L foi executado com esta versao.
+
+## 15/10/2026 - revisao corretiva do Ciclo 01 (Claude Code, nao commitada)
+
+### Decisoes
+
+- 401/403/404: por orientacao da revisao corretiva de 15/10, segue a secao 7 do Guia. So a mensagem rejeitada e descartada (codigo e conteudo no serial); as demais ficam na fila e o envio continua pausado. A decisao preliminar A3 da revisao 2 era preservar; a mudanca aguarda confirmacao no questionario.
+- Um 200 de `GET /iot/commands/{device_id}` libera uma telemetria, mas nao encerra a pausa: o nivel da pausa so zera quando a API aceita uma telemetria. Se a verificacao der 200 e a telemetria continuar 401/403/404, as esperas crescem ate 5 min, com no maximo uma mensagem descartada por volta.
+- `Retry-After` (orientacao da mesma revisao, aguarda confirmacao em A5): respeitado integralmente, sem o teto de 15 min; o unico limite e o do temporizador de 32 bits (~49,7 dias), com aviso no serial. Valores ilegiveis esperam 60 s, valores enormes saturam e o parsing rejeita sinais, decimais e datas.
+- Leitor de cabecalhos: sai na hora se a conexao cair, ignora o `Retry-After` de uma linha truncada e mantem a leitura do corpo (Content-Length e chunked continuam a cargo do `readHeader()` da biblioteca).
+- GPS/UART: o monitor serial e a USB CDC e nao ha conflito no codigo. O buffer RX nao foi alterado: o core so permite mudar antes do `begin()`, e a perda de NMEA ainda precisa ser medida na bancada.
+
+### Compilacao e testes
+
+- `pio run -e esp32-c3-devkitm-1`: sucesso.
+- `test/host/run_tests.ps1`: 377 verificacoes, 0 falhas. Simulam o HttpClient e a logica; nao comprovam a compatibilidade com a API real.

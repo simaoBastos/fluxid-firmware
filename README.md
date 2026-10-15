@@ -68,7 +68,7 @@ Mensagem (message_id) ────┘                                      │
                                                                  ▼
                                     Wi-Fi conectado? ──► POST /iot/telemetries
                                                                  │
-  200/201/202/409 ──► remove · 400/413 ──► descarta · 401/403/404 ──► mantém e pausa · 429/5xx/sem resposta ──► mantém e reenvia
+  200/201/202/409 ──► remove · 400/413 ──► descarta · 401/403/404 ──► descarta só essa e pausa · 429/5xx/sem resposta ──► mantém e reenvia
 ```
 
 A cada volta do `loop()`:
@@ -78,14 +78,14 @@ A cada volta do `loop()`:
 3. Com Wi-Fi conectado, envia a mensagem mais antiga da fila (a cada 2 s enquanto não houver falhas):
    - `200`, `201`, `202` ou `409`: remove da fila.
    - `400` ou `413` (corpo inválido): registra o código e o conteúdo no serial e **descarta**, porque reenviar a mesma mensagem não resolve.
-   - `401`, `403` ou `404` (chave ou cadastro): **mantém a mensagem e pausa o envio de telemetria**. O diagnóstico mostra `Envio PAUSADO (HTTP ...)` e os LEDs vão para `NAO_CADASTRADO` (401/404) ou `DESATIVADO` (403). Durante a pausa, o firmware **não reenvia telemetria**: verifica a chave com `GET /iot/commands/{device_id}`, rota documentada do próprio dispositivo que usa a mesma `X-API-Key` e só lista comandos pendentes, após 30 s, 60 s, 120 s e depois a cada 5 min. Um `200` retoma os envios na hora. Reiniciar a placa também encerra a pausa. As telemetrias novas continuam sendo guardadas.
-   - `429`: mantém e espera os segundos do `Retry-After`. Sem o cabeçalho, ou com ele em formato de data, usa a espera crescente abaixo.
+   - `401`, `403` ou `404` (chave ou cadastro): conforme a seção 7 do Guia, **descarta só a mensagem rejeitada** (o código e o conteúdo vão para o serial) e **pausa o envio das demais**, que continuam na fila. O diagnóstico mostra `Envio PAUSADO (HTTP ...)` e os LEDs vão para `NAO_CADASTRADO` (401/404) ou `DESATIVADO` (403). Durante a pausa, o firmware não envia telemetria: verifica a chave com `GET /iot/commands/{device_id}`, rota documentada do próprio dispositivo que usa a mesma `X-API-Key` e só lista comandos pendentes. Um `200` libera **uma** nova telemetria, mas não é prova definitiva: a pausa só se encerra de vez quando a API aceita uma telemetria. Se a telemetria for rejeitada de novo, uma mensagem é descartada nessa volta e a próxima espera cresce: 30 s, 60 s, 120 s e depois 5 min. Reiniciar a placa encerra a pausa. As telemetrias novas continuam sendo guardadas.
+   - `429`: mantém e espera os segundos do `Retry-After`, **por mais longo que seja**. Sem o cabeçalho, usa a espera crescente abaixo. Com o cabeçalho ilegível (por exemplo, em formato de data), espera 60 s.
    - `5xx`, outros códigos ou sem resposta: mantém e espera 5 s, 15 s, 30 s e depois 60 s a cada falha seguida, ficando em 60 s. Um sucesso volta ao intervalo de 2 s.
    - Sempre que uma tentativa é **realizada** e a mensagem continua na fila, o arquivo é regravado com o **mesmo** `message_id` e `attempt_count + 1`. Se nada foi transmitido (Wi-Fi caiu, URL inválida), o contador não muda.
 
-**Teto do `Retry-After`:** a espera é limitada a 15 min. As janelas de limite da API são de 1 minuto (120 mensagens por lacre, 60 chaves erradas por endereço), então o `Retry-After` esperado fica abaixo de 60 s e o teto só age contra valores anormais. Nesse caso, a tentativa sai antes do pedido e, no pior caso, recebe outro `429`. Remover ou mudar o teto é uma decisão pendente.
+**`Retry-After` longo:** o valor pedido pela API é respeitado integralmente. Acima de 15 min, o serial mostra um aviso para a espera não parecer travamento. O único limite é o do temporizador de 32 bits em milissegundos: cerca de 49,7 dias (4.294.967 s). Acima disso, a espera fica nesse máximo, também com aviso. Valores grandes demais para 32 bits saturam, sem virar um número pequeno. As janelas de limite da API são de 1 minuto, então valores longos não são esperados. **Limitação:** a espera fica só na RAM; um reinício durante ela faz uma nova tentativa logo após o boot, que recebe outro `429` se o limite ainda estiver valendo.
 
-**Tempos da requisição HTTP:** a resposta tem até 10 s para a linha de status, 3 s para os demais cabeçalhos e 1 s por pausa na leitura do corpo. A conexão TCP usa o padrão do `WiFiClient` (3 s). Com URL de IP, uma tentativa sem resposta bloqueia o loop por cerca de 13 s no pior caso típico. Com URL de nome de host, o DNS pode somar até cerca de 15 s. Durante esse tempo, a UART do GPS guarda só cerca de 0,4 s de NMEA a 9600 baud (buffer de 256 bytes mais FIFO de 128), então frases são perdidas. Se o bloqueio passar de 5 s, a próxima telemetria pode sair com `gps_ok:false` até chegar uma frase nova, porque o fix é considerado velho.
+**Tempos da requisição HTTP:** a resposta tem até 10 s para a linha de status, 3 s para os demais cabeçalhos e 1 s por pausa na leitura do corpo. A conexão TCP usa o padrão do `WiFiClient` (3 s). Com URL de IP, uma tentativa sem resposta bloqueia o loop por cerca de 13 s no pior caso típico (estimativa pelos timeouts configurados; ainda não medido na placa). Com URL de nome de host, o DNS pode somar até cerca de 15 s. Durante esse tempo, a UART do GPS guarda só cerca de 0,4 s de NMEA a 9600 baud (buffer de 256 bytes mais FIFO de 128), então frases são perdidas. Se o bloqueio passar de 5 s, a próxima telemetria pode sair com `gps_ok:false` até chegar uma frase nova, porque o fix é considerado velho.
 4. A cada 3 s, imprime um diagnóstico no monitor serial: Wi-Fi, GSM, posição, bateria e tamanho da fila.
 
 A fila grava cada mensagem primeiro num arquivo `.tmp` e depois renomeia para `.json`, para que uma queda de energia não deixe mensagens corrompidas. Temporários abandonados são removidos na inicialização.
@@ -163,7 +163,7 @@ Resumo em [docs/integrations/api/API_CONTRACT.md](docs/integrations/api/API_CONT
 - Campos obrigatórios: `message_id`, `device_id`, `latitude`, `longitude`, `battery_percent`.
 - Reenvios mantêm o mesmo `message_id` e incrementam `attempt_count`.
 - `200/201/202/409` confirmam a entrega · `400/401/403/404/413` não devem ser reenviados · `429` deve respeitar `Retry-After` · `500` ou falta de resposta mantêm a mensagem na fila.
-- **Divergência no Guia:** as seções 5 e 6 dizem "não insistir" para `401/403/404` e definem os estados `NAO_CADASTRADO`/`DESATIVADO`. A seção 7 e o exemplo de código mandam descartar. O firmware preserva as mensagens e pausa o envio, à espera da confirmação do backend.
+- **401/403/404 no Guia:** a seção 7 e o exemplo de código mandam descartar a mensagem rejeitada; as seções 5 e 6 mandam não insistir. O firmware faz as duas coisas: descarta só a mensagem rejeitada e pausa o envio das demais.
 
 ## Limitações conhecidas
 

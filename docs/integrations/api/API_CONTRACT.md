@@ -18,8 +18,8 @@ Fonte principal: `reference/Guia-Firmware-Lacre-IoT.md`. O cabecalho do arquivo 
 | --- | --- | --- |
 | 200/201/202/409 confirmam | Remove da fila | Conforme |
 | 400/413 nao reenviar | Registra e descarta so essa mensagem | Conforme |
-| 401/403/404 nao insistir | Preserva a fila, pausa a telemetria e verifica a chave com `GET /iot/commands/{device_id}` (30 s, 60 s, 120 s, depois 5 min) | Conforme as secoes 5 e 6; **diverge da secao 7**, que manda descartar (pendencia D1) |
-| 429 com `Retry-After` | Espera o valor informado, com teto de 15 min | Teto pendente de decisao (D2) |
+| 401/403/404: descartar (secao 7) e nao insistir (secoes 5 e 6) | Descarta so a mensagem rejeitada, pausa as demais e verifica a chave com `GET /iot/commands/{device_id}`. Um 200 libera uma telemetria; so a aceitacao dela encerra a pausa. Esperas de 30 s, 60 s, 120 s e depois 5 min | Conforme pela leitura do Guia; aguarda confirmacao humana (A3) |
+| 429 com `Retry-After` | Espera o valor informado integralmente (limite do temporizador: ~49,7 dias); ilegivel: 60 s | Conforme; a espera nao sobrevive a um reinicio |
 | 500 ou sem resposta: mesmo `message_id` e `attempt_count + 1` | Espera de 5 s, 15 s, 30 s e depois 60 s; +1 so em tentativa realizada | Conforme |
 | Sem GPS depois do primeiro fix: ultima posicao com `gps_ok:false` | Implementado | Conforme; bancada pendente |
 | `battery_percent` obrigatorio | Enviado com valor provisorio 100 | **Nao e medicao real** |

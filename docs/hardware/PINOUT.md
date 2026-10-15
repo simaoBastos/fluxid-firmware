@@ -29,7 +29,7 @@ O firmware acende os LEDs com `HIGH` (ver `LED.cpp`). O resistor, o seu valor e 
 | GPIO2, GPIO8, GPIO9 | Pinos de strapping do ESP32-C3. O GPIO9 é o botão BOOT da DevKitM-1. Não usados pelo firmware. |
 | GPIO3, GPIO4, GPIO5, GPIO10 | Livres no firmware atual. GPIO0 a GPIO5 são os únicos que acordam o C3 do deep sleep, e GPIO0 a GPIO4 têm ADC1 (útil para a bateria). Reservar com cuidado para o sensor do lacre e a bateria. |
 
-As informações desta seção vêm da documentação da Espressif para o ESP32-C3 e a DevKitM-1, não de medição na montagem.
+As informações desta seção vêm do conhecimento geral sobre o ESP32-C3 e a DevKitM-1 (documentação da Espressif). **A documentação não foi consultada durante a preparação deste arquivo**, e nada foi medido na montagem: confirmar no datasheet antes de usar esses pinos.
 
 ## Estado por função
 
@@ -48,11 +48,27 @@ Pendências para conferir na bancada. **Nenhum item abaixo foi medido ou validad
 
 - **GPS no 3V3:** informado pelo responsável. Conferir se o módulo GPS usado aceita 3,3 V na entrada de alimentação e se o 3V3 da DevKitM-1 dá conta da corrente do GPS mais a do restante.
 - **GND comum:** informado. Necessário para as duas UARTs funcionarem.
-- **SIM800L, alimentação:** o datasheet da SIMCom indica alimentação entre 3,4 V e 4,4 V e picos de cerca de 2 A durante a transmissão. **Não alimentar pelo 3V3 da placa.** É preciso uma fonte dedicada com capacitor de reserva perto do modem. A fonte usada na montagem não foi registrada.
+- **SIM800L, alimentação:** pelo que é geralmente indicado pela SIMCom (o datasheet não foi consultado durante a preparação deste arquivo; confirmar), a alimentação fica entre 3,4 V e 4,4 V e picos de cerca de 2 A durante a transmissão. **Não alimentar pelo 3V3 da placa.** É preciso uma fonte dedicada com capacitor de reserva perto do modem. A fonte usada na montagem não foi registrada.
 - **SIM800L, nível lógico:** a UART do modem trabalha em torno de 2,8 V. Conferir se o TX do ESP32-C3 (3,3 V) para o RXD do modem precisa de divisor ou conversor, e se o TXD do modem é lido corretamente pelo ESP32-C3. Pendente.
 - **SIM800L, antena e SIM:** sem registro de teste.
 - **GPIO20/21:** são os pinos padrão da UART0 do C3 (U0RXD/U0TXD). No reset, a ROM pode imprimir mensagens de boot no GPIO21, que vai para o RX do GPS. Em geral é inofensivo; não foi verificado.
 - **LEDs:** o valor dos resistores e a corrente por GPIO não foram registrados.
+
+## UARTs e monitor serial (conferido no código em 15/10/2026)
+
+| Uso | Periférico | Pinos | Onde |
+| --- | --- | --- | --- |
+| Monitor serial (`Serial`) | USB CDC interno (`HWCDC`), por `ARDUINO_USB_CDC_ON_BOOT=1` | GPIO18/19 (USB) | `platformio.ini` |
+| GPS | UART1 (`HardwareSerial SerialGPS(1)`), 9600 baud | RX 20 / TX 21 | `GPS.cpp` |
+| SIM800L | UART0 (`HardwareSerial SerialSIM800(0)`), 9600 baud | RX 6 / TX 7 | `GSM.cpp` |
+
+- **Não há conflito no código entre o GPS e o monitor serial:** o `Serial` é a USB CDC, e não uma UART. Os objetos globais `Serial0` e `Serial1` do core existem, mas o firmware nunca chama `begin()` neles.
+- GPIO20/21 são os pinos padrão da UART0 do C3, mas o firmware usa neles a **UART1**, e a UART0 vai para os GPIOs 6/7.
+- **A verificar na bancada:**
+  - No reset, a ROM imprime o log de boot no GPIO21 antes de o firmware remapear as UARTs, e esse texto chega ao RX do GPS.
+  - Saídas de baixo nível na UART0, como mensagens de pânico, podem sair pelo GPIO7, que vai para o RX do SIM800L.
+  - Nenhum dos dois foi observado.
+- **Buffer RX do GPS:** 256 bytes mais a FIFO de 128, cerca de 0,4 s de NMEA a 9600 baud. O core permite aumentar com `SerialGPS.setRxBufferSize(n)`, mas só **antes** do `begin()`: depois, a função recusa e retorna 0. **Não foi alterado.** Mesmo 2 KB cobririam só cerca de 2 s, menos que um bloqueio do HTTP (cerca de 13 s). **A perda de NMEA durante bloqueios ainda precisa ser medida na bancada** antes de decidir.
 
 ## Manutenção deste documento
 

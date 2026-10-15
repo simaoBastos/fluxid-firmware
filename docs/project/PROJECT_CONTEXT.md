@@ -25,6 +25,7 @@ O projeto usa PlatformIO, Arduino e ESP32-C3 DevKitM-1 (Espressif32 7.1.3). Bibl
 ## Limitacoes relevantes
 
 - Nao implementados: sensor de rompimento, rele/solenoide, medicao de bateria, deep sleep, eventos, alertas, comandos, HTTPS e HTTP por GSM.
-- A requisicao HTTP bloqueia o loop (cerca de 13 s sem resposta com URL de IP).
+- A requisicao HTTP bloqueia o loop (estimativa de cerca de 13 s sem resposta com URL de IP; nao medido).
 - A fila nao tem limite de tamanho; a capacidade real da particao de 1,375 MB nao foi medida.
-- Divergencia no Guia para 401/403/404: a secao 7 manda descartar e as secoes 5 e 6 mandam nao insistir. O firmware preserva a mensagem.
+- 401/403/404: o firmware descarta so a mensagem rejeitada (secao 7 do Guia) e pausa as demais (secoes 5 e 6). Implementado por orientacao da revisao corretiva de 15/10; aguarda confirmacao no questionario (A3).
+- A perda de frases NMEA durante bloqueios longos do HTTP ainda precisa ser medida na bancada.
