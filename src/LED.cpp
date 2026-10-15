@@ -22,17 +22,23 @@ const uint32_t TEMPO_LONGO = 500;
 const uint32_t INTERVALO_SIMBOLOS = TEMPO_CURTO;
 const uint32_t INTERVALO_CODIGO = 1000;
 
-void PiscarLED(uint32_t tempoLigado, uint32_t tempoDesligado)
+// Estado cujo padrao esta sendo exibido. Ao mudar, os dois LEDs sao
+// apagados e os temporizadores reiniciados (EntrarNoPadrao).
+EstadoDispositivo estadoLED = OPERACIONAL;
+bool padraoIniciado = false;
+
+void PiscarLED(uint8_t pino, bool& ligado,
+               uint32_t tempoLigado, uint32_t tempoDesligado)
 {
 uint32_t agora = millis();
 
-    if (ledVerdeLigado)
+    if (ligado)
     {
         if (agora - ultimoEnvioLED >= tempoLigado)
         {
-            digitalWrite(ledVerde, LOW);
+            digitalWrite(pino, LOW);
 
-            ledVerdeLigado = false;
+            ligado = false;
             
         
             ultimoEnvioLED = agora;
@@ -43,13 +49,27 @@ uint32_t agora = millis();
     {
         if (agora - ultimoEnvioLED >= tempoDesligado)
         {
-            digitalWrite(ledVerde, HIGH);
+            digitalWrite(pino, HIGH);
             
-            ledVerdeLigado = true;
+            ligado = true;
         
             ultimoEnvioLED = agora;
         }
     }
+}
+
+void EntrarNoPadrao(EstadoDispositivo estado)
+{
+    digitalWrite(ledVerde, LOW);
+    digitalWrite(ledVermelho, LOW);
+
+    ledVerdeLigado = false;
+    ledVermelhoLigado = false;
+    indiceAtual = 0;
+    ultimoEnvioLED = millis();
+
+    estadoLED = estado;
+    padraoIniciado = true;
 }
 
 void ReproduzirCodigoErro()
@@ -107,10 +127,24 @@ void InicializarLEDs(uint8_t pinoVerde, uint8_t pinoVermelho)
     pinMode(pinoVermelho, OUTPUT);
     digitalWrite(pinoVerde, LOW);
     digitalWrite(pinoVermelho, LOW);
+
+    padraoIniciado = false;
 }
 
+// Padroes (nao bloqueantes):
+//   NAO_CADASTRADO  verde fixo, vermelho apagado (401/404)
+//   OPERACIONAL     verde pisca 100 ms a cada 4 s, vermelho apagado
+//   LACRE_ROMPIDO   vermelho fixo, verde apagado (sem sensor ainda)
+//   ERRO            vermelho repete curto-curto-longo-curto, verde apagado
+//   DESATIVADO      vermelho pisca 1 s / 1 s, verde apagado (403)
+//   MANUTENCAO      verde e vermelho alternam a cada 500 ms
 void AtualizarLEDs()
 {
+    if (!padraoIniciado || estadoAtual != estadoLED)
+    {
+        EntrarNoPadrao(estadoAtual);
+    }
+
     switch (estadoAtual)
     {
     case NAO_CADASTRADO:
@@ -120,7 +154,8 @@ void AtualizarLEDs()
 
     case OPERACIONAL:
     {
-        PiscarLED(100, 4000);
+        digitalWrite(ledVermelho, LOW);
+        PiscarLED(ledVerde, ledVerdeLigado, 100, 4000);
         
         break;
     }
@@ -131,8 +166,18 @@ void AtualizarLEDs()
         break;
 
     case ERRO:
-        digitalWrite(ledVerde, HIGH);
+        digitalWrite(ledVerde, LOW);
         ReproduzirCodigoErro();
+        break;
+
+    case DESATIVADO:
+        digitalWrite(ledVerde, LOW);
+        PiscarLED(ledVermelho, ledVermelhoLigado, 1000, 1000);
+        break;
+
+    case MANUTENCAO:
+        PiscarLED(ledVerde, ledVerdeLigado, 500, 500);
+        digitalWrite(ledVermelho, ledVerdeLigado ? LOW : HIGH);
         break;
     
     default:

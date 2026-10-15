@@ -6,3 +6,6 @@
 
 # Configuracao local. Nunca versionar credenciais ou identificadores provisionados.
 include/secrets.h
+
+# Gerado por "pio run -t compiledb"; especifico de cada maquina.
+compile_commands.json

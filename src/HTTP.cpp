@@ -5,8 +5,7 @@
 #include <ArduinoHttpClient.h>
 
 #include <HTTP.h>
-#include <JSON.h>
-#include <Mensagem.h>
+#include <CabecalhosHTTP.h>
 #include <GSM.h>
 #include <secrets.h>
 
@@ -79,41 +78,103 @@ namespace
         return endereco;
     }
 
-    int FazerRequisicao(
+    // Esperas da requisicao (etapa 3). A conexao TCP usa o padrao do
+    // WiFiClient (3 s); se FLUXID_API_BASE_URL usar nome de host, o DNS
+    // pode somar ate cerca de 15 s antes disso.
+    const uint32_t TIMEOUT_RESPOSTA_MS = 10000UL;   // ate a linha de status
+    const uint32_t TIMEOUT_CABECALHOS_MS = 3000UL;  // demais cabecalhos
+    const uint32_t TIMEOUT_CORPO_MS = 1000UL;       // por byte do corpo
+
+    // Adapta o HttpClient ao leitor de CabecalhosHTTP.h.
+    struct LeitorHttpClient
+    {
+        HttpClient& http;
+
+        bool endOfHeadersReached() { return http.endOfHeadersReached(); }
+        int available() { return http.available(); }
+        int readHeader() { return http.readHeader(); }
+        bool conectado() { return http.connected(); }
+        void esperar() { delay(1); }
+    };
+
+    uint32_t Agora()
+    {
+        return millis();
+    }
+
+    ResultadoEnvio FazerRequisicao(
         Client& cliente,
         const EnderecoAPI& endereco,
+        const char* metodo,
         const String& caminho,
         const String& payload)
     {
+        ResultadoEnvio resultado;
+        resultado.retry_after_s = 0;
+        resultado.retry_after_invalido = false;
+        resultado.requisicao_realizada = true;
+
         HttpClient http(cliente, endereco.host.c_str(), endereco.porta);
+        http.setHttpResponseTimeout(TIMEOUT_RESPOSTA_MS);
+        http.setTimeout(TIMEOUT_CORPO_MS);
 
         http.beginRequest();
-        http.post(caminho.c_str());
+        http.startRequest(caminho.c_str(), metodo);
 
-        http.sendHeader("Content-Type", "application/json");
+        if (payload.length() > 0)
+            http.sendHeader("Content-Type", "application/json");
+
         http.sendHeader("X-API-Key", FLUXID_DEVICE_API_KEY);
-        http.sendHeader("Content-Length", payload.length());
 
-        http.beginBody();
-        http.print(payload);
+        if (payload.length() > 0)
+        {
+            http.sendHeader("Content-Length", payload.length());
+            http.beginBody();
+            http.print(payload);
+        }
+
         http.endRequest();
 
-        Serial.println("POST enviado; aguardando resposta da API...");
+        Serial.print(metodo);
+        Serial.println(" enviado; aguardando resposta da API...");
         Serial.print("Destino: http://");
         Serial.print(endereco.host);
         Serial.print(":");
         Serial.print(endereco.porta);
         Serial.println(caminho);
-        Serial.print("Tamanho do payload: ");
-        Serial.println(payload.length());
 
-        int codigo = http.responseStatusCode();
+        if (payload.length() > 0)
+        {
+            Serial.print("Tamanho do payload: ");
+            Serial.println(payload.length());
+        }
 
-        // Consome o corpo da resposta antes de encerrar a conexão.
-        String resposta = http.responseBody();
+        resultado.codigo = http.responseStatusCode();
+
+        String resposta;
+
+        if (resultado.codigo > 0)
+        {
+            // Os cabecalhos precisam ser lidos antes do corpo.
+            LeitorHttpClient leitor{http};
+            ResultadoCabecalhos cabecalhos =
+                LerCabecalhosHTTP(leitor, Agora, TIMEOUT_CABECALHOS_MS);
+
+            resultado.retry_after_s = cabecalhos.retry_after_s;
+            resultado.retry_after_invalido = cabecalhos.retry_after_invalido;
+
+            // Consome o corpo da resposta antes de encerrar a conexão.
+            if (cabecalhos.completos)
+                resposta = http.responseBody();
+            else
+                Serial.println(
+                    "AVISO: cabecalhos HTTP incompletos "
+                    "(tempo esgotado ou conexao encerrada); corpo ignorado."
+                );
+        }
 
         Serial.print("HTTP status: ");
-        Serial.println(codigo);
+        Serial.println(resultado.codigo);
 
         if (resposta.length() > 0)
         {
@@ -121,34 +182,45 @@ namespace
             Serial.println(resposta);
         }
 
+        if (resultado.retry_after_s > 0)
+        {
+            Serial.print("Retry-After (s): ");
+            Serial.println(resultado.retry_after_s);
+        }
+        else if (resultado.retry_after_invalido)
+        {
+            Serial.println("AVISO: Retry-After presente, mas ilegivel.");
+        }
+
         http.stop();
-        return codigo;
-    }
-}
-
-int EnviarDadosTelemetria(const String& payload)
-{
-    const uint8_t MAX_TENTATIVAS = 1;
-
-    if (payload.isEmpty())
-    {
-        Serial.println("Envio cancelado: telemetria indisponivel.");
-        return -1;
+        return resultado;
     }
 
-    EnderecoAPI endereco = InterpretarURL();
-
-    if (!endereco.valido)
+    ResultadoEnvio ResultadoNaoRealizado()
     {
-        Serial.println("URL da API invalida. Verifique FLUXID_API_BASE_URL.");
-        return -1;
+        ResultadoEnvio resultado;
+        resultado.codigo = -1;
+        resultado.retry_after_s = 0;
+        resultado.retry_after_invalido = false;
+        resultado.requisicao_realizada = false;
+        resultado.acao = ENVIO_REPETIR;
+        return resultado;
     }
 
-    String caminho = endereco.caminhoBase + "/iot/telemetries";
-
-    for (uint8_t tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++)
+    // Valida URL e Wi-Fi e faz a requisicao; nada e transmitido se falhar.
+    ResultadoEnvio Requisitar(
+        const char* metodo,
+        const String& sufixo,
+        const String& payload)
     {
-        Client* cliente = nullptr;
+        EnderecoAPI endereco = InterpretarURL();
+
+        if (!endereco.valido)
+        {
+            Serial.println("URL da API invalida. Verifique FLUXID_API_BASE_URL.");
+            return ResultadoNaoRealizado();
+        }
+
         WiFiClient clienteWiFi;
 
         // if (WiFi.status() == WL_CONNECTED) // comentado até que o gsm seja responsável por fazer a conexão com internet
@@ -161,90 +233,89 @@ int EnviarDadosTelemetria(const String& payload)
         //     cliente = ObterClienteGSM();
         //     Serial.println("Transporte selecionado: GPRS");
         // }
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            cliente = &clienteWiFi;
-            Serial.println("Transporte selecionado: Wi-Fi");
-        }
-        else
+        if (WiFi.status() != WL_CONNECTED)
         {
             Serial.println("Envio cancelado: Wi-Fi indisponivel.");
-            return -1;
+            return ResultadoNaoRealizado();
         }
 
-        if (cliente == nullptr)
-        {
-            Serial.println("Sem Wi-Fi ou GPRS disponivel.");
-            return -1;
-        }
+        Serial.println("Transporte selecionado: Wi-Fi");
 
-        Serial.print("Tentativa HTTP: ");
-        Serial.println(tentativa);
-
-        int codigo = FazerRequisicao(
-            *cliente,
+        ResultadoEnvio resultado = FazerRequisicao(
+            clienteWiFi,
             endereco,
-            caminho,
+            metodo,
+            endereco.caminhoBase + sufixo,
             payload
         );
 
-        if (codigo == 200 || codigo == 201 ||
-            codigo == 202 || codigo == 409)
-        {
+        resultado.acao = ClassificarRespostaHTTP(resultado.codigo);
+        return resultado;
+    }
+}
+
+ResultadoEnvio EnviarDadosTelemetria(const String& payload)
+{
+    if (payload.isEmpty())
+    {
+        Serial.println("Envio cancelado: telemetria indisponivel.");
+        return ResultadoNaoRealizado();
+    }
+
+    ResultadoEnvio resultado = Requisitar(
+        HTTP_METHOD_POST,
+        "/iot/telemetries",
+        payload
+    );
+
+    if (!resultado.requisicao_realizada)
+        return resultado;
+
+    switch (resultado.acao)
+    {
+        case ENVIO_CONFIRMADO:
             Serial.println(
-                codigo == 409
+                resultado.codigo == 409
                     ? "Mensagem duplicada ou ja recebida."
                     : "Telemetria aceita pela API."
             );
+            break;
 
-            return codigo;
-        }
+        case ENVIO_REJEITADO:
+            Serial.println("Erro permanente: corpo da mensagem invalido.");
+            break;
 
-        if (codigo == 400 || codigo == 401 ||
-            codigo == 403 || codigo == 404 ||
-            codigo == 413)
-        {
-            Serial.println("Erro permanente: verificar payload, chave ou dispositivo.");
-            return codigo;
-        }
+        case ENVIO_PAUSAR:
+            Serial.println(
+                resultado.codigo == 404
+                    ? "Dispositivo nao cadastrado na API (HTTP 404)."
+                    : resultado.codigo == 403
+                        ? "Chave de outro dispositivo ou dispositivo desativado (HTTP 403)."
+                        : "Chave ausente ou invalida (HTTP 401)."
+            );
+            break;
 
-        if (codigo == 429)
-        {
-            Serial.println("API limitou as requisicoes (HTTP 429).");
-        }
-        else if (codigo >= 400 && codigo < 500)
-        {
-            Serial.println("Erro HTTP de cliente; sem repeticao automatica.");
-            return codigo;
-        }
-        else
-        {
-            Serial.println("Falha temporaria de comunicacao ou servidor.");
-        }
-
-        if (tentativa < MAX_TENTATIVAS)
-        {
-            dadosMensagem.attempt_count++;
-
-            uint32_t esperaMs =
-                (codigo == 429) ? 10000UL :
-                (tentativa == 1) ? 10000UL : 30000UL;
-
-            delay(esperaMs);
-        }
-        else
-        {
-            Serial.println("Limite de tentativas atingido.");
-            return codigo;
-        }
+        case ENVIO_REPETIR:
+            Serial.println(
+                resultado.codigo == 429
+                    ? "API limitou as requisicoes (HTTP 429)."
+                    : "Falha temporaria de comunicacao ou servidor."
+            );
+            break;
     }
 
-    return -1;
+    return resultado;
 }
 
-int EnviarDadosTelemetria()
+ResultadoEnvio VerificarAutorizacaoAPI()
 {
-    return EnviarDadosTelemetria(
-        MontarJsonTelemetria()
+    // Rota documentada do proprio dispositivo, autenticada com a mesma
+    // X-API-Key. So lista comandos pendentes; nao confirma nenhum.
+    Serial.println("Verificando chave e cadastro na API...");
+
+    return Requisitar(
+        HTTP_METHOD_GET,
+        String("/iot/commands/") + FLUXID_DEVICE_ID,
+        String()
     );
 }
