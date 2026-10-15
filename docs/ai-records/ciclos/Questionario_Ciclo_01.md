@@ -3,7 +3,7 @@
 **Tarefa:** fila offline e envio HTTP conforme o contrato da API (Guia-Firmware-Lacre-IoT, seções 5, 6 e 7), LEDs, timeouts e pinout
 **Branch:** `fix/fila-contrato-api`. PR: [#1](https://github.com/simaoBastos/fluxid-firmware/pull/1), aberto em 15/10/2026 a pedido da equipe e **ainda não mesclado**. A revisão corretiva (revisão 4) ainda **não foi commitada**.
 **Validador:** _pendente: o nome só é inserido após a aprovação final_
-**Situação:** **em validação**. Testado só em software; nenhum teste na placa ou contra a API real.
+**Situação:** **validação física parcial** relatada por Simão Bastos em 15/10/2026 (commit 9ac4093, mesclado no `main` pelo PR #1). As partes A e C não foram respondidas formalmente. Itens sem relato continuam pendentes.
 
 ## Histórico das revisões
 
@@ -86,22 +86,22 @@ Marque S ou N.
 | A10 | Timeout de resposta de 10 s, cabeçalhos com 3 s e o novo leitor de cabeçalhos estão adequados? | | |
 | A11 | O `PINOUT.md` está correto e não afirma nada que não foi validado? | | |
 
-## Parte B: testes de bancada (nenhum realizado)
+## Parte B: testes de bancada (situação conforme o relato de 15/10)
 
 Grave com `pio run -t upload` e acompanhe com `pio device monitor`. **Não rode `erase` nem `uploadfs` na placa da apresentação: os dois apagam a fila.**
 
 | # | Teste | Como fazer | Resultado esperado | Situação |
 | --- | --- | --- | --- | --- |
-| B1 | Envio normal | Wi-Fi, API e chave corretos, com fix | `HTTP status: 202`, `Telemetria removida da fila`; LED verde piscando e vermelho apagado | Pendente |
-| B2 | Sem resposta | API desligada | `Proxima tentativa em (s): 5`, depois 15, 30, 60, 60; `attempt_count atualizado para N` uma vez por tentativa | Pendente |
+| B1 | Envio normal | Wi-Fi, API e chave corretos, com fix | `HTTP status: 202`, `Telemetria removida da fila`; LED verde piscando e vermelho apagado | Aprovado (relato de 15/10, E4: HTTP 202 e remoção da fila). LEDs: parcial (E5) |
+| B2 | Sem resposta | API desligada | `Proxima tentativa em (s): 5`, depois 15, 30, 60, 60; `attempt_count atualizado para N` uma vez por tentativa | Aprovado (relato de 15/10, E6) |
 | B3 | Sem Wi-Fi | Desligue o roteador | Nenhum envio é tentado; o `attempt_count` não muda | Pendente |
-| B4 | Recuperação | Religue a API | Retoma em até 60 s; envio em ordem com o mesmo `message_id` e `attempt_count` maior que 0 | Pendente |
-| B5 | Chave errada | `FLUXID_DEVICE_API_KEY` incorreta | `HTTP status: 401`; `Telemetria descartada (HTTP 401)` só para essa mensagem; `Envio PAUSADO (HTTP 401)`; LED verde fixo; `Verificando chave e cadastro na API...` em 30, 60, 120 s e depois a cada 300 s; as demais mensagens ficam na fila | Pendente |
-| B6 | Recuperação da chave | Regrave com a chave correta e reinicie, ou corrija o cadastro e aguarde a verificação | `Autorizacao confirmada; envios retomados.` (ou envio logo após o boot); a fila esvazia | Pendente |
+| B4 | Recuperação | Religue a API | Retoma em até 60 s; envio em ordem com o mesmo `message_id` e `attempt_count` maior que 0 | Aprovado (relato de 15/10, E6) |
+| B5 | Chave errada | `FLUXID_DEVICE_API_KEY` incorreta | `HTTP status: 401`; `Telemetria descartada (HTTP 401)` só para essa mensagem; `Envio PAUSADO (HTTP 401)`; LED verde fixo; `Verificando chave e cadastro na API...` em 30, 60, 120 s e depois a cada 300 s; as demais mensagens ficam na fila | Pendente (T3 não testado) |
+| B6 | Recuperação da chave | Regrave com a chave correta e reinicie, ou corrija o cadastro e aguarde a verificação | `Autorizacao confirmada; envios retomados.` (ou envio logo após o boot); a fila esvazia | Pendente (T3 não testado) |
 | B7 | Corpo inválido (400) | Comente temporariamente `doc["battery_percent"]` em `JSON.cpp` | `HTTP status: 400`; `Telemetria descartada (HTTP 400)` com o conteúdo; a próxima mensagem é enviada | Pendente |
-| B8 | Perda de fix | Depois do fix, desconecte o GPS | O JSON sai com `"gps_ok":false` e a última posição | Pendente |
+| B8 | Perda de fix | Depois do fix, desconecte o GPS | O JSON sai com `"gps_ok":false` e a última posição | Comportamento aprovado (relato de 15/10, E7); sinalização visual nos LEDs a conferir |
 | B9 | Antes do primeiro fix | Reinicie sem sinal de GPS | Nenhuma telemetria; `Posicao utilizavel: Nao` | Pendente |
-| B10 | Reinício com fila | Reinicie com mensagens na fila | Contagem e ordem preservadas; o envio retoma | Pendente |
+| B10 | Reinício com fila | Reinicie com mensagens na fila | Contagem e ordem preservadas; o envio retoma | Pendente (T2 não testado; a reinicialização sem fila foi aprovada em T1) |
 | B11 | Bloqueio do HTTP | API num IP que aceita conexão mas não responde, ou desligada | Medir quanto tempo o loop trava (esperado: até cerca de 13 s) | Pendente |
 | B12 | LittleFS indisponível | **Só numa placa de teste:** `pio run -t erase` e depois `upload` | `Fila offline: INDISPONIVEL`; LED vermelho com o código de erro; nenhum dado apagado pelo firmware | Pendente |
 | B13 | 429 | Só com uma API simulada ou ultrapassando o limite | `Retry-After (s): N`; próxima tentativa em N s | Pendente; difícil de reproduzir |
