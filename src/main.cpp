@@ -11,6 +11,8 @@
 #include <Dispositivo.h>
 #include <Mensagem.h>
 #include <FilaOffline.h>
+#include <Estado.h>
+#include <PoliticaEnvio.h>
 
 // ATENCAO: usar true somente durante o teste controlado.
 // Depois, alterar para false.
@@ -19,12 +21,32 @@ const bool MODO_TESTE_TELEMETRIA = false;
 const uint32_t INTERVALO_NOVA_TELEMETRIA = 10000UL;
     // MODO_TESTE_TELEMETRIA ? 10000UL : 30000UL;
 
-const uint32_t INTERVALO_TENTATIVA_ENVIO = 2000UL;
+// Nova tentativa de montar o LittleFS, sem formatar.
+const uint32_t INTERVALO_REMONTAGEM_FILA = 30000UL;
 
 uint32_t ultimoRegistroTelemetria = 0;
 uint32_t ultimaTentativaEnvio = 0;
+uint32_t ultimaTentativaFila = 0;
+
+// Esperas, falhas seguidas e pausa por 401/403/404 (PoliticaEnvio).
+EstadoEnvio estadoEnvio;
 
 bool filaDisponivel = false;
+
+// true quando estadoAtual foi alterado por AtualizarSinalizacao().
+bool sinalizacaoAtiva = false;
+
+
+// Reflete nos LEDs uma fila indisponivel ou um envio pausado.
+void AtualizarSinalizacao()
+{
+    estadoAtual = CalcularEstadoSinalizado(
+        estadoAtual,
+        sinalizacaoAtiva,
+        filaDisponivel,
+        estadoEnvio.codigoPausa
+    );
+}
 
 
 void PrepararDadosDeTeste()
@@ -56,8 +78,11 @@ void setup()
     InicializarDispositivo();
     InicializarMensagem();
 
+    IniciarEstadoEnvio(estadoEnvio);
+
     filaDisponivel = InicializarFilaOffline();
-    
+    ultimaTentativaFila = millis();
+
 
     Serial.print("Resultado da inicializacao da fila: ");
     Serial.println(filaDisponivel ? "SUCESSO" : "FALHA");
@@ -159,26 +184,50 @@ if (DadosGPSAtualizados())
 
         Serial.print("Posicao utilizavel: ");
         Serial.println(
-            MODO_TESTE_TELEMETRIA
-            ? (dadosTelemetria.tem_posicao_valida ? "Sim" : "Nao")
-            : (dadosTelemetria.gps_ok ? "Sim" : "Nao")
+            !dadosTelemetria.tem_posicao_valida ? "Nao"
+            : dadosTelemetria.gps_ok ? "Sim (atual)"
+            : "Sim (ultima conhecida, gps_ok=false)"
         );
 
         Serial.print("Bateria reportada: ");
         Serial.println(dadosDispositivo.battery_percent);
 
+        Serial.print("Fila offline: ");
+        Serial.println(
+            filaDisponivel
+                ? "OK"
+                : "INDISPONIVEL (LittleFS nao montou; nenhum dado apagado)"
+        );
+
         Serial.print("Mensagens na fila: ");
         Serial.println(QuantidadeNaFilaOffline());
+
+        if (estadoEnvio.codigoPausa != 0)
+        {
+            Serial.print("Envio PAUSADO (HTTP ");
+            Serial.print(estadoEnvio.codigoPausa);
+            Serial.println(
+                "): conferir chave e cadastro. Mensagens preservadas."
+            );
+        }
 
         Serial.println("-----------------------");
     }
 
-    
+    // 0. Sem fila, tenta montar o LittleFS de novo (sem formatar).
+    if (!filaDisponivel &&
+        agora - ultimaTentativaFila >= INTERVALO_REMONTAGEM_FILA)
+    {
+        ultimaTentativaFila = agora;
+        filaDisponivel = InicializarFilaOffline();
+    }
+
+    AtualizarSinalizacao();
+
     // 1. Criar e persistir uma nova telemetria.
-    bool localizacaoDisponivel =
-        MODO_TESTE_TELEMETRIA
-            ? dadosTelemetria.tem_posicao_valida
-            : dadosTelemetria.gps_ok;
+    // Depois do primeiro fix, continua enviando: sem fix atual, vai a
+    // ultima posicao valida com gps_ok=false. Antes do primeiro fix, nada.
+    bool localizacaoDisponivel = dadosTelemetria.tem_posicao_valida;
 
     bool bateriaValida = true;
         // (dadosDispositivo.battery_percent >= 0 &&
@@ -193,6 +242,13 @@ if (DadosGPSAtualizados())
     {
         // Evita tentativas contínuas se houver falha.
         ultimoRegistroTelemetria = agora;
+
+        // Reavalia a idade do fix: se o GPS parou de mandar dados,
+        // gps_ok passa a false em vez de repetir uma posicao velha.
+        if (!MODO_TESTE_TELEMETRIA)
+        {
+            ObterDadosGPS();
+        }
 
         NovaMensagem();
 
@@ -229,49 +285,108 @@ if (DadosGPSAtualizados())
     
     // 2. Tentar enviar a mensagem mais antiga.
     // Se nao houver Wi-Fi, ela permanece na fila.
-    if (
+    bool envioLiberado =
         filaDisponivel &&
         WiFi.status() == WL_CONNECTED &&
-        agora - ultimaTentativaEnvio >=
-            INTERVALO_TENTATIVA_ENVIO
-    )
+        agora - ultimaTentativaEnvio >= estadoEnvio.intervaloMs;
+
+    if (envioLiberado && estadoEnvio.codigoPausa != 0)
+    {
+        // Pausa por chave/cadastro: verifica a autorizacao sem reenviar
+        // telemetria e sem apagar nada; so um 200 retoma os envios.
+        ResultadoEnvio verificacao = VerificarAutorizacaoAPI();
+
+        ultimaTentativaEnvio = millis();
+
+        DecidirAposVerificacao(
+            estadoEnvio,
+            verificacao.codigo,
+            verificacao.retry_after_s
+        );
+
+        if (estadoEnvio.codigoPausa == 0)
+        {
+            Serial.println("Autorizacao confirmada; envios retomados.");
+        }
+        else
+        {
+            Serial.print("Envio continua pausado. Nova verificacao em (s): ");
+            Serial.println(estadoEnvio.intervaloMs / 1000UL);
+        }
+    }
+    else if (envioLiberado)
     {
         String caminho;
         String payload;
 
         if (ObterProximaDaFilaOffline(caminho, payload))
         {
-            ultimaTentativaEnvio = millis();
-
             Serial.println();
             Serial.print("Enviando mensagem da fila: ");
             Serial.println(caminho);
 
-            int codigo = EnviarDadosTelemetria(payload);
+            ResultadoEnvio resultado = EnviarDadosTelemetria(payload);
+
+            ultimaTentativaEnvio = millis();
 
             Serial.print("Resposta HTTP: ");
-            Serial.println(codigo);
+            Serial.println(resultado.codigo);
 
-            if (
-                codigo == 200 ||
-                codigo == 201 ||
-                codigo == 202 ||
-                codigo == 409
-            )
+            DecisaoEnvio decisao = DecidirAposEnvio(
+                estadoEnvio,
+                resultado.acao,
+                resultado.codigo,
+                resultado.retry_after_s,
+                resultado.requisicao_realizada
+            );
+
+            // Mesmo message_id e attempt_count + 1, uma vez por tentativa
+            // realizada em que a mensagem continua na fila.
+            if (decisao.registrarTentativa)
             {
-                if (!RemoverDaFilaOffline(caminho))
-                {
-                    Serial.println(
-                        "AVISO: API confirmou, mas nao "
-                        "foi possivel remover o arquivo."
-                    );
-                }
+                RegistrarTentativaNaFilaOffline(caminho, payload);
             }
-            else
+
+            switch (decisao.fila)
             {
-                Serial.println(
-                    "Mensagem mantida na fila para nova tentativa."
-                );
+                case FILA_REMOVER:
+                    if (!RemoverDaFilaOffline(caminho))
+                    {
+                        Serial.println(
+                            "AVISO: API confirmou, mas nao "
+                            "foi possivel remover o arquivo."
+                        );
+                    }
+                    break;
+
+                case FILA_DESCARTAR:
+                    // Corpo invalido: reenviar nao resolve; libera a fila.
+                    if (!DescartarDaFilaOffline(
+                            caminho, payload, resultado.codigo))
+                    {
+                        Serial.println(
+                            "AVISO: nao foi possivel descartar o arquivo."
+                        );
+                    }
+                    break;
+
+                case FILA_MANTER:
+                    if (estadoEnvio.codigoPausa != 0)
+                    {
+                        Serial.print(
+                            "Envio pausado; mensagens preservadas. "
+                            "Verificacao da chave em (s): "
+                        );
+                    }
+                    else
+                    {
+                        Serial.print(
+                            "Mensagem mantida na fila. Proxima tentativa em (s): "
+                        );
+                    }
+
+                    Serial.println(estadoEnvio.intervaloMs / 1000UL);
+                    break;
             }
         }
     }

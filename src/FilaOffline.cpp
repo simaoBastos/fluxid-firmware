@@ -4,6 +4,7 @@
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <FilaOffline.h>
+#include <ArduinoJson.h>
 #include <vector>
 
 namespace
@@ -12,6 +13,7 @@ namespace
 
     Preferences preferenciasFila;
     bool filaInicializada = false;
+    bool preferenciasAbertas = false;
     uint32_t sequenciaArquivo = 0;
 
     String GerarNomeArquivo(uint32_t numero)
@@ -86,11 +88,14 @@ namespace
 
 bool InicializarFilaOffline()
 {
-    // Nao formata automaticamente a flash.
+    // Nao formata automaticamente a flash. Uma falha de montagem nao
+    // prova que a particao esta vazia: formatar poderia apagar a fila.
+    // O main tenta montar de novo periodicamente.
     if (!LittleFS.begin(false))
     {
         Serial.println(
-            "ERRO: nao foi possivel montar o LittleFS."
+            "ERRO: nao foi possivel montar o LittleFS. "
+            "Nenhum dado foi apagado."
         );
 
         filaInicializada = false;
@@ -113,7 +118,15 @@ bool InicializarFilaOffline()
     // Remove temporarios abandonados por interrupcoes anteriores.
     LimparArquivosTemporarios();
 
-    if (!preferenciasFila.begin("fluxqueue", false))
+    // Preferences::begin() falha se ja estiver aberto; a inicializacao
+    // pode ser repetida depois de uma falha de montagem.
+    if (!preferenciasAbertas)
+    {
+        preferenciasAbertas =
+            preferenciasFila.begin("fluxqueue", false);
+    }
+
+    if (!preferenciasAbertas)
     {
         Serial.println(
             "ERRO: nao foi possivel abrir Preferences da fila."
@@ -122,8 +135,6 @@ bool InicializarFilaOffline()
         filaInicializada = false;
         return false;
     }
-
-    
 
     sequenciaArquivo =
         preferenciasFila.getUInt("sequence", 0);
@@ -332,6 +343,99 @@ bool RemoverDaFilaOffline(const String& caminho)
     }
 
     return removido;
+}
+
+bool DescartarDaFilaOffline(
+    const String& caminho,
+    const String& payload,
+    int codigoHTTP)
+{
+    // Corpo invalido (400/413): o Guia manda registrar e descartar.
+    // O conteudo vai para o serial para permitir a analise do erro.
+    Serial.print("Telemetria descartada (HTTP ");
+    Serial.print(codigoHTTP);
+    Serial.print("): ");
+    Serial.println(caminho);
+    Serial.print("Conteudo descartado: ");
+    Serial.println(payload);
+
+    return RemoverDaFilaOffline(caminho);
+}
+
+bool RegistrarTentativaNaFilaOffline(
+    const String& caminho,
+    const String& payload)
+{
+    if (!filaInicializada || caminho.isEmpty())
+    {
+        return false;
+    }
+
+    JsonDocument doc;
+
+    if (deserializeJson(doc, payload))
+    {
+        Serial.println(
+            "ERRO: JSON da fila invalido; attempt_count nao atualizado."
+        );
+
+        return false;
+    }
+
+    doc["attempt_count"] = doc["attempt_count"].as<uint32_t>() + 1;
+
+    String atualizado;
+    serializeJson(doc, atualizado);
+
+    // Mesma estrategia da gravacao: escreve no temporario e renomeia.
+    String temporario = caminho + ".tmp";
+
+    File arquivo = LittleFS.open(temporario, "w");
+
+    if (!arquivo)
+    {
+        Serial.println(
+            "ERRO: nao foi possivel criar temporario da fila."
+        );
+
+        return false;
+    }
+
+    size_t escritos = arquivo.print(atualizado);
+
+    arquivo.flush();
+    arquivo.close();
+
+    if (escritos != atualizado.length())
+    {
+        LittleFS.remove(temporario);
+
+        Serial.println(
+            "ERRO: escrita incompleta ao atualizar a fila."
+        );
+
+        return false;
+    }
+
+    // O lfs_rename substitui o destino existente. Se falhar, o
+    // arquivo original continua intacto e sera reenviado mesmo assim.
+    if (!LittleFS.rename(temporario, caminho))
+    {
+        LittleFS.remove(temporario);
+
+        Serial.println(
+            "ERRO: nao foi possivel atualizar arquivo da fila."
+        );
+
+        return false;
+    }
+
+    Serial.print("attempt_count atualizado para ");
+    Serial.print(doc["attempt_count"].as<uint32_t>());
+    Serial.print(": ");
+    Serial.println(caminho);
+
+    return true;
 }
 
 uint16_t QuantidadeNaFilaOffline()

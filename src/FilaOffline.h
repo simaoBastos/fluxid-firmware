@@ -13,6 +13,20 @@ bool ObterProximaDaFilaOffline(
 
 bool RemoverDaFilaOffline(const String& caminho);
 
+// Remove uma mensagem com corpo invalido (HTTP 400 ou 413),
+// registrando o conteudo no serial.
+bool DescartarDaFilaOffline(
+    const String& caminho,
+    const String& payload,
+    int codigoHTTP
+);
+
+// Regrava a mensagem com attempt_count + 1 antes do proximo reenvio.
+bool RegistrarTentativaNaFilaOffline(
+    const String& caminho,
+    const String& payload
+);
+
 uint16_t QuantidadeNaFilaOffline();
 
 bool LimparFilaOffline();
