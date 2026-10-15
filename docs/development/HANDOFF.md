@@ -1,22 +1,32 @@
 # Handoff da etapa atual
 
+Atualizado em 15/10/2026.
+
 ## Situacao
 
-Foi concluida a auditoria inicial, a consolidacao da documentacao de contrato, a preparacao de segredos locais e a base de diagnostico serial do SIM800L. O envio HTTP continua desabilitado e nao houve teste fisico.
+O Ciclo 01 esta no PR [#1](https://github.com/simaoBastos/fluxid-firmware/pull/1) (`fix/fila-contrato-api`), aguardando a validacao humana. Tudo foi compilado e testado em software; **nada foi testado na placa ou contra a API real com esta versao**.
 
 ## Alteracoes desta etapa
 
-- `include/secrets.example.h`: modelo versionado sem credenciais.
-- `include/secrets.h`: arquivo local ignorado, com placeholders de compilacao.
-- `src/WiFiConn.cpp`, `src/Dispositivo.cpp`, `src/HTTP.cpp`: configuracao retirada de literais versionados.
-- `src/GSM.cpp`, `src/GSM.h`, `src/main.cpp`: UART do modem e maquina de diagnostico AT com timeout.
-- Documentos em `docs/integrations/api`, `docs/project` e `docs/development`.
+- `src/PoliticaEnvio.h/.cpp` (novo): respostas HTTP, esperas de 5 s a 60 s, `Retry-After`, pausa por 401/403/404 com verificacao da chave e sinalizacao nos LEDs.
+- `src/CabecalhosHTTP.h` (novo): leitura dos cabecalhos com limite de tempo, porque o `headerAvailable()` do ArduinoHttpClient 0.6.2 nao tem timeout.
+- `src/HTTP.cpp/.h`: timeout de resposta de 10 s e `VerificarAutorizacaoAPI()` (`GET /iot/commands/{device_id}`).
+- `src/FilaOffline.cpp/.h`: descarte so em 400/413, regravacao do `attempt_count`, sem formatacao automatica e montagem repetivel.
+- `src/main.cpp`: usa a politica de envio, tenta montar o LittleFS de novo a cada 30 s e envia telemetria depois do primeiro fix com `gps_ok:false`.
+- `src/LED.cpp`: troca de estado apaga os dois LEDs; padroes para `DESATIVADO` e `MANUTENCAO`; `ERRO` usa so o vermelho.
+- `test/host/`: testes no computador (MSVC).
+- `docs/hardware/PINOUT.md` e `README.md`.
 
 ## Comandos executados
 
-- `pio run -e esp32-c3-devkitm-1` antes das alteracoes: sucesso.
-- `pio run -e esp32-c3-devkitm-1 --silent` apos as alteracoes: sucesso.
+- `pio run -e esp32-c3-devkitm-1`: SUCCESS (RAM 12,2%, Flash 65,0%).
+- `powershell -ExecutionPolicy Bypass -File test\host\run_tests.ps1`: 247 verificacoes, 0 falhas.
+- `git diff --check`: sem problemas.
 
 ## Bloqueios e proxima revisao humana
 
-Antes de energizar o SIM800L, confirmar alimentacao definitiva, aterramento comum, antena, SIM, taxa UART e circuito de nivel logico. Para o proximo ciclo, preencher apenas `include/secrets.h` local com dados provisionados e validar a sequencia AT na bancada. Nao avancar para HTTP por GSM sem revisao da fila, credenciais e dados moveis.
+- Preencher `include/secrets.h` na maquina da apresentacao: Wi-Fi, URL da API, chave e `device_id`.
+- Fazer os testes de bancada da parte B do questionario.
+- Decidir D1 (descartar ou preservar em 401/403/404) e D2 (teto do `Retry-After`).
+- **Nao rodar `erase` nem `uploadfs` na placa da apresentacao:** os dois apagam a fila.
+- Depois da aprovacao: inserir o validador e preencher o Registro 07 em `docs/ai-records/ciclos/`.

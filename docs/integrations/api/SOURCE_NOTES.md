@@ -2,8 +2,8 @@
 
 ## Referencias consultadas
 
-- `reference/ESP32-envio-de-dados.md` - versao 2.2, 11/10/2026.
-- `reference/Guia-Firmware-Lacre-IoT.md` - versao 2.2, aprovada por Nata da Silva Baracho em 11/10/2026.
+- `reference/ESP32-envio-de-dados.md` - versao 2.3, 12/10/2026 (cabecalho do arquivo).
+- `reference/Guia-Firmware-Lacre-IoT.md` - o cabecalho diz versao 2.0 (10/10/2026), mas o historico do proprio arquivo vai ate a 2.3 (12/10/2026). A 2.1 foi aprovada por Nata da Silva Baracho em 10/10/2026. Divergencia registrada; o arquivo nao foi alterado.
 - `reference/Regras-de-Negocio-e-Banco-Oxide.md`.
 - `reference/Tipos-de-Erro.md` - versao 2.0, 10/10/2026.
 
