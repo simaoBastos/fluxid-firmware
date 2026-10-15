@@ -57,3 +57,11 @@
 
 - `pio run -e esp32-c3-devkitm-1`: sucesso.
 - `test/host/run_tests.ps1`: 377 verificacoes, 0 falhas. Simulam o HttpClient e a logica; nao comprovam a compatibilidade com a API real.
+
+## 15/10/2026 - validacao fisica e auditoria final do Ciclo 01 (Claude Code)
+
+- O PR #1 foi mesclado no `main` (merge `6af9529`, feito no GitHub pela conta NatBaracho), com o conteudo do commit `9ac4093`.
+- Validacao fisica relatada por Simao Bastos: aprovados inicializacao/LittleFS, Wi-Fi, GPS (6 satelites, HDOP de cerca de 1,61 a 1,62), envio com HTTP 202, indisponibilidade e recuperacao da API e reinicializacao; LEDs parcialmente aprovados; perda do GPS aprovada quanto ao comportamento. Nao testados: persistencia da fila apos reinicio, 401/403/404, LEDs apos erro e bateria. GSM: "modem sem resposta".
+- Auditoria final sem alteracao de codigo: nenhum defeito comprovado. A falta de sinal visual na perda do GPS vem de uma integracao nao implementada (ver `HANDOFF.md`).
+- `pio run -e esp32-c3-devkitm-1`: sucesso. `test/host/run_tests.ps1`: 377 verificacoes, 0 falhas. `git diff --check`: sem problemas.
+- Registro 07 concluido a partir de uma copia do Registro 01, so com os textos dos campos trocados; o rascunho foi removido.

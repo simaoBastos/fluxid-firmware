@@ -4,7 +4,15 @@ Atualizado em 15/10/2026.
 
 ## Situacao
 
-O Ciclo 01 esta no PR [#1](https://github.com/simaoBastos/fluxid-firmware/pull/1) (`fix/fila-contrato-api`), aguardando a validacao humana. Tudo foi compilado e testado em software; **nada foi testado na placa ou contra a API real com esta versao**.
+O Ciclo 01 foi mesclado no `main` pelo PR [#1](https://github.com/simaoBastos/fluxid-firmware/pull/1) (merge `6af9529`, conteudo do commit `9ac4093`). Validacao fisica parcial relatada por Simao Bastos em 15/10/2026: aprovados E1 a E4, E6 e T1; E5 parcial; E7 aprovado quanto ao comportamento; T2 a T5 nao testados. O Registro 07 foi concluido em `docs/ai-records/ciclos/Registro_07_Ciclo01_Fila_HTTP_LEDs_FluxID.docx`.
+
+### Diagnostico: sinal de erro do GPS nos LEDs (15/10, sem alteracao de codigo)
+
+- `ReproduzirCodigoErro()` (`src/LED.cpp`) existe e reproduz um unico codigo, CURTO-CURTO-LONGO-CURTO, e so roda no estado `ERRO`.
+- A perda do GPS so muda `gps_ok` para false (`src/GPS.cpp`); nenhum codigo muda `estadoAtual` por causa do GPS.
+- `CalcularEstadoSinalizado()` (`src/PoliticaEnvio.cpp`) so usa a fila indisponivel (`ERRO`) e a pausa 401/403/404 (`NAO_CADASTRADO`/`DESATIVADO`). Com o GPS sem fix, o estado continua `OPERACIONAL` (verde piscando), o que explica a falta de sinal visual.
+- Nao ha defeito na rotina; falta a integracao, que exige decidir qual estado ou padrao usar (o `ERRO` gera evento `hardware_failure` segundo o Guia, secao 5).
+- `AtualizarLEDs()` roda uma vez por volta do `loop()`; durante uma requisicao HTTP bloqueante o padrao congela e depois continua.
 
 ## Alteracoes desta etapa
 
@@ -30,4 +38,5 @@ O Ciclo 01 esta no PR [#1](https://github.com/simaoBastos/fluxid-firmware/pull/1
 - Revisao corretiva de 15/10 (nao commitada): 401/403/404 descartam so a mensagem rejeitada (secao 7) e mantem a pausa; o `Retry-After` e respeitado sem o teto de 15 min; o leitor de cabecalhos sai na hora se a conexao cair e trata `Retry-After` ilegivel (60 s).
 - Medir na bancada a perda de NMEA durante bloqueios do HTTP antes de mexer no buffer da UART do GPS.
 - **Nao rodar `erase` nem `uploadfs` na placa da apresentacao:** os dois apagam a fila.
-- Registro 07 em rascunho (`docs/ai-records/ciclos/Registro_07_Ciclo01_Fila_HTTP_LEDs_FluxID_RASCUNHO.docx`), com validacao humana e decisao final pendentes. Depois da aprovacao: inserir o validador, completar esses campos e remover a marca de rascunho.
+- Testes fisicos pendentes: T2 (persistencia da fila apos reinicio), T3 (401/403/404), T4 (LEDs apos erro e recuperacao), T5 (bateria) e a sinalizacao visual da perda do GPS.
+- Questionario do Ciclo 01: partes A e C ainda sem resposta formal.
