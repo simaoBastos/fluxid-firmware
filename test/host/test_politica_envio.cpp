@@ -7,6 +7,20 @@
 
 namespace
 {
+    RespostaAPI Resposta(
+        int codigo,
+        uint32_t retryAfter = 0,
+        bool retryAfterInvalido = false,
+        bool realizada = true)
+    {
+        RespostaAPI r;
+        r.codigo = codigo;
+        r.retry_after_s = retryAfter;
+        r.retry_after_invalido = retryAfterInvalido;
+        r.requisicao_realizada = realizada;
+        return r;
+    }
+
     // Simula um envio e devolve a decisao, como o main.cpp faz.
     DecisaoEnvio Enviar(
         EstadoEnvio& estado,
@@ -15,12 +29,12 @@ namespace
         bool realizada = true)
     {
         return DecidirAposEnvio(
-            estado,
-            ClassificarRespostaHTTP(codigo),
-            codigo,
-            retryAfter,
-            realizada
-        );
+            estado, Resposta(codigo, retryAfter, false, realizada));
+    }
+
+    void Verificar(EstadoEnvio& estado, int codigo, uint32_t retryAfter = 0)
+    {
+        DecidirAposVerificacao(estado, Resposta(codigo, retryAfter));
     }
 
     void TestarClassificacao()
@@ -66,10 +80,11 @@ namespace
         VERIFICAR_IGUAL(60000, EsperaAposFalha(255));
 
         VERIFICAR_IGUAL(30000, EsperaVerificacaoPausa(0));
-        VERIFICAR_IGUAL(60000, EsperaVerificacaoPausa(1));
-        VERIFICAR_IGUAL(120000, EsperaVerificacaoPausa(2));
-        VERIFICAR_IGUAL(300000, EsperaVerificacaoPausa(3));
-        VERIFICAR_IGUAL(300000, EsperaVerificacaoPausa(200));
+        VERIFICAR_IGUAL(30000, EsperaVerificacaoPausa(1));
+        VERIFICAR_IGUAL(60000, EsperaVerificacaoPausa(2));
+        VERIFICAR_IGUAL(120000, EsperaVerificacaoPausa(3));
+        VERIFICAR_IGUAL(300000, EsperaVerificacaoPausa(4));
+        VERIFICAR_IGUAL(300000, EsperaVerificacaoPausa(255));
     }
 
     void TestarSequenciaDeFalhas()
@@ -119,12 +134,12 @@ namespace
         // Tentativas realizadas em que a mensagem fica: +1 cada.
         VERIFICAR(Enviar(estado, 503).registrarTentativa);
         VERIFICAR(Enviar(estado, 429, 10).registrarTentativa);
-        VERIFICAR(Enviar(estado, 401).registrarTentativa);
 
         // Mensagem que sai da fila nao e regravada.
         IniciarEstadoEnvio(estado);
         VERIFICAR(!Enviar(estado, 409).registrarTentativa);
         VERIFICAR(!Enviar(estado, 400).registrarTentativa);
+        VERIFICAR(!Enviar(estado, 401).registrarTentativa);
     }
 
     void TestarRejeicao()
@@ -140,33 +155,68 @@ namespace
         VERIFICAR_IGUAL(FILA_DESCARTAR, decisao.fila);
         VERIFICAR_IGUAL(2000, estado.intervaloMs);
         VERIFICAR_IGUAL(0, estado.falhasSeguidas);
+        VERIFICAR_IGUAL(0, estado.codigoPausa);
 
         VERIFICAR_IGUAL(FILA_DESCARTAR, Enviar(estado, 413).fila);
     }
 
-    void TestarRetryAfter()
+    void TestarInterpretarRetryAfter()
     {
-        VERIFICAR_IGUAL(120, InterpretarRetryAfter("120"));
-        VERIFICAR_IGUAL(30, InterpretarRetryAfter("  30 "));
-        VERIFICAR_IGUAL(0, InterpretarRetryAfter("0"));
-        VERIFICAR_IGUAL(0, InterpretarRetryAfter(""));
-        VERIFICAR_IGUAL(0, InterpretarRetryAfter(nullptr));
-        VERIFICAR_IGUAL(0, InterpretarRetryAfter("-5"));
-        VERIFICAR_IGUAL(0, InterpretarRetryAfter("12abc"));
-        VERIFICAR_IGUAL(0, InterpretarRetryAfter("Wed, 21 Oct 2026 07:28:00 GMT"));
-        VERIFICAR_IGUAL(0xFFFFFFFFUL, InterpretarRetryAfter("99999999999999"));
+        uint32_t s = 99;
 
-        uint32_t segundos = 0;
-        VERIFICAR(ExtrairRetryAfter("Retry-After: 45", segundos));
-        VERIFICAR_IGUAL(45, segundos);
-        VERIFICAR(ExtrairRetryAfter("retry-after:7", segundos));
-        VERIFICAR_IGUAL(7, segundos);
-        VERIFICAR(ExtrairRetryAfter("RETRY-AFTER : 9", segundos));
-        VERIFICAR_IGUAL(9, segundos);
-        VERIFICAR(!ExtrairRetryAfter("Content-Length: 12", segundos));
-        VERIFICAR(!ExtrairRetryAfter("Retry-After-Extra: 3", segundos));
-        VERIFICAR(!ExtrairRetryAfter("", segundos));
+        VERIFICAR(InterpretarRetryAfter("120", s));
+        VERIFICAR_IGUAL(120, s);
+        VERIFICAR(InterpretarRetryAfter("  30 \t", s));
+        VERIFICAR_IGUAL(30, s);
+        VERIFICAR(InterpretarRetryAfter("0", s));
+        VERIFICAR_IGUAL(0, s);
+        VERIFICAR(InterpretarRetryAfter("3600", s));
+        VERIFICAR_IGUAL(3600, s);
+        VERIFICAR(InterpretarRetryAfter("4294967295", s));
+        VERIFICAR_IGUAL(4294967295ULL, s);
 
+        // Acima de uint32_t: satura, sem estourar para um valor pequeno.
+        VERIFICAR(InterpretarRetryAfter("4294967296", s));
+        VERIFICAR_IGUAL(0xFFFFFFFFUL, s);
+        VERIFICAR(InterpretarRetryAfter("99999999999999999999", s));
+        VERIFICAR_IGUAL(0xFFFFFFFFUL, s);
+
+        // Invalidos: nao sao segundos.
+        VERIFICAR(!InterpretarRetryAfter("", s));
+        VERIFICAR_IGUAL(0, s);
+        VERIFICAR(!InterpretarRetryAfter("   ", s));
+        VERIFICAR(!InterpretarRetryAfter(nullptr, s));
+        VERIFICAR(!InterpretarRetryAfter("-5", s));
+        VERIFICAR(!InterpretarRetryAfter("+5", s));
+        VERIFICAR(!InterpretarRetryAfter("12abc", s));
+        VERIFICAR(!InterpretarRetryAfter("1.5", s));
+        VERIFICAR(!InterpretarRetryAfter("12 34", s));
+        VERIFICAR(!InterpretarRetryAfter("Wed, 21 Oct 2026 07:28:00 GMT", s));
+
+        bool valido = false;
+        VERIFICAR(ExtrairRetryAfter("Retry-After: 45", s, valido));
+        VERIFICAR(valido);
+        VERIFICAR_IGUAL(45, s);
+        VERIFICAR(ExtrairRetryAfter("retry-after:7", s, valido));
+        VERIFICAR_IGUAL(7, s);
+        VERIFICAR(ExtrairRetryAfter("RETRY-AFTER : 9", s, valido));
+        VERIFICAR_IGUAL(9, s);
+
+        // Cabecalho presente com valor ilegivel: reconhecido e invalido.
+        VERIFICAR(ExtrairRetryAfter("Retry-After: Wed, 21 Oct 2026", s, valido));
+        VERIFICAR(!valido);
+        VERIFICAR_IGUAL(0, s);
+        VERIFICAR(ExtrairRetryAfter("Retry-After:", s, valido));
+        VERIFICAR(!valido);
+
+        VERIFICAR(!ExtrairRetryAfter("Content-Length: 12", s, valido));
+        VERIFICAR(!ExtrairRetryAfter("Retry-After-Extra: 3", s, valido));
+        VERIFICAR(!ExtrairRetryAfter("X-Retry-After: 3", s, valido));
+        VERIFICAR(!ExtrairRetryAfter("", s, valido));
+    }
+
+    void TestarRetryAfter429()
+    {
         EstadoEnvio estado;
         IniciarEstadoEnvio(estado);
 
@@ -175,65 +225,163 @@ namespace
         VERIFICAR_IGUAL(FILA_MANTER, decisao.fila);
         VERIFICAR_IGUAL(45000, estado.intervaloMs);
 
+        // Acima de 15 min: respeitado integralmente (sem reducao).
+        Enviar(estado, 429, 901);
+        VERIFICAR_IGUAL(901000, estado.intervaloMs);
+        Enviar(estado, 429, 3600);
+        VERIFICAR_IGUAL(3600000, estado.intervaloMs);
+        Enviar(estado, 429, 86400);
+        VERIFICAR_IGUAL(86400000ULL, estado.intervaloMs);
+
+        // Maior valor representavel em ms de 32 bits, exato.
+        Enviar(estado, 429, RETRY_AFTER_MAXIMO_S);
+        VERIFICAR_IGUAL(RETRY_AFTER_MAXIMO_S * 1000ULL, estado.intervaloMs);
+
+        // Acima disso: o maximo do temporizador, nunca um valor pequeno.
+        Enviar(estado, 429, RETRY_AFTER_MAXIMO_S + 1);
+        VERIFICAR_IGUAL(0xFFFFFFFFUL, estado.intervaloMs);
+        Enviar(estado, 429, 0xFFFFFFFFUL);
+        VERIFICAR_IGUAL(0xFFFFFFFFUL, estado.intervaloMs);
+
         // Sem Retry-After: espera crescente.
         IniciarEstadoEnvio(estado);
         Enviar(estado, 429, 0);
         VERIFICAR_IGUAL(5000, estado.intervaloMs);
 
-        // Teto de seguranca (inalterado nesta etapa) e sem estouro.
-        Enviar(estado, 429, 0xFFFFFFFFUL);
-        VERIFICAR_IGUAL(ESPERA_MAXIMA_RETRY_AFTER_MS, estado.intervaloMs);
-        Enviar(estado, 429, 900);
-        VERIFICAR_IGUAL(900000, estado.intervaloMs);
-        Enviar(estado, 429, 901);
-        VERIFICAR_IGUAL(900000, estado.intervaloMs);
+        // Retry-After ilegivel: 60 s, nao a primeira espera curta.
+        IniciarEstadoEnvio(estado);
+        DecidirAposEnvio(estado, Resposta(429, 0, true));
+        VERIFICAR_IGUAL(ESPERA_RETRY_AFTER_INVALIDO_MS, estado.intervaloMs);
+        VERIFICAR(estado.intervaloMs >= 60000);
+
+        // Retry-After so vale para 429.
+        IniciarEstadoEnvio(estado);
+        Enviar(estado, 503, 3600);
+        VERIFICAR_IGUAL(5000, estado.intervaloMs);
+
+        // Conversao direta, sem estouro.
+        VERIFICAR_IGUAL(0, EsperaRetryAfterMs(0));
+        VERIFICAR_IGUAL(1000, EsperaRetryAfterMs(1));
+        VERIFICAR_IGUAL(4294967000ULL, EsperaRetryAfterMs(4294967));
+        VERIFICAR_IGUAL(0xFFFFFFFFUL, EsperaRetryAfterMs(4294968));
     }
 
-    void TestarPausa()
+    void TestarPausaDescartaSoARejeitada()
     {
         EstadoEnvio estado;
         IniciarEstadoEnvio(estado);
 
-        // 401: mensagem mantida, pausa e primeira verificacao em 30 s.
+        // 401: secao 7, descarta so esta mensagem; pausa as demais.
         DecisaoEnvio decisao = Enviar(estado, 401);
-        VERIFICAR_IGUAL(FILA_MANTER, decisao.fila);
+        VERIFICAR_IGUAL(FILA_DESCARTAR, decisao.fila);
+        VERIFICAR(!decisao.registrarTentativa);
         VERIFICAR_IGUAL(401, estado.codigoPausa);
+        VERIFICAR_IGUAL(1, estado.nivelPausa);
         VERIFICAR_IGUAL(30000, estado.intervaloMs);
 
-        // Verificacoes que falham espacam ate 5 min, sem apagar nada.
-        DecidirAposVerificacao(estado, 401, 0);
+        VERIFICAR_IGUAL(FILA_DESCARTAR, Enviar(estado, 403).fila);
+        VERIFICAR_IGUAL(FILA_DESCARTAR, Enviar(estado, 404).fila);
+    }
+
+    void TestarVerificacaoNaPausa()
+    {
+        EstadoEnvio estado;
+        IniciarEstadoEnvio(estado);
+        Enviar(estado, 401);
+
+        // Verificacoes sem sucesso espacam ate 5 min, sem apagar nada.
+        Verificar(estado, 401);
         VERIFICAR_IGUAL(60000, estado.intervaloMs);
-        DecidirAposVerificacao(estado, -3, 0); // rede: continua pausado
+        Verificar(estado, -3); // rede: continua pausado
         VERIFICAR_IGUAL(401, estado.codigoPausa);
         VERIFICAR_IGUAL(120000, estado.intervaloMs);
-        DecidirAposVerificacao(estado, 403, 0); // motivo atualizado
+        Verificar(estado, 403); // motivo atualizado
         VERIFICAR_IGUAL(403, estado.codigoPausa);
         VERIFICAR_IGUAL(300000, estado.intervaloMs);
-        DecidirAposVerificacao(estado, 500, 0);
+        Verificar(estado, 500);
         VERIFICAR_IGUAL(300000, estado.intervaloMs);
-
-        // Nada abaixo de 30 s durante a pausa (sem ciclo rapido).
         VERIFICAR(estado.intervaloMs >= 30000);
 
-        // 429 na verificacao respeita o Retry-After.
-        DecidirAposVerificacao(estado, 429, 50);
+        // 429 na verificacao respeita o Retry-After, inclusive longo.
+        Verificar(estado, 429, 50);
         VERIFICAR_IGUAL(50000, estado.intervaloMs);
+        Verificar(estado, 429, 7200);
+        VERIFICAR_IGUAL(7200000, estado.intervaloMs);
         VERIFICAR(estado.codigoPausa != 0);
 
         // Outros 2xx nao bastam como prova de autorizacao.
-        DecidirAposVerificacao(estado, 202, 0);
+        Verificar(estado, 202);
         VERIFICAR(estado.codigoPausa != 0);
 
-        // 200 retoma o envio normal imediatamente.
-        DecidirAposVerificacao(estado, 200, 0);
+        // 200 libera o envio, mas mantem o nivel da pausa.
+        uint8_t nivel = estado.nivelPausa;
+        Verificar(estado, 200);
         VERIFICAR_IGUAL(0, estado.codigoPausa);
-        VERIFICAR_IGUAL(0, estado.verificacoesPausa);
         VERIFICAR_IGUAL(2000, estado.intervaloMs);
+        VERIFICAR_IGUAL(nivel, estado.nivelPausa);
 
-        // Uma nova pausa recomeca a sequencia de verificacoes.
+        // Telemetria aceita: so entao a pausa e encerrada de vez.
+        Enviar(estado, 202);
+        VERIFICAR_IGUAL(0, estado.nivelPausa);
+
         Enviar(estado, 404);
-        VERIFICAR_IGUAL(404, estado.codigoPausa);
+        VERIFICAR_IGUAL(1, estado.nivelPausa);
         VERIFICAR_IGUAL(30000, estado.intervaloMs);
+    }
+
+    void TestarSemCicloRapidoComVerificacaoEnganosa()
+    {
+        // A verificacao responde 200, mas a telemetria continua 401.
+        // Cada volta deve esperar mais, ate 5 min, e descartar no maximo
+        // uma mensagem por volta.
+        EstadoEnvio estado;
+        IniciarEstadoEnvio(estado);
+
+        uint32_t esperaAnterior = 0;
+        int descartadas = 0;
+
+        for (int volta = 0; volta < 20; volta++)
+        {
+            DecisaoEnvio decisao = Enviar(estado, 401);
+            if (decisao.fila == FILA_DESCARTAR) descartadas++;
+
+            uint32_t espera = estado.intervaloMs;
+            VERIFICAR(espera >= 30000);
+            VERIFICAR(espera >= esperaAnterior);
+            esperaAnterior = espera;
+
+            Verificar(estado, 200);
+            VERIFICAR_IGUAL(0, estado.codigoPausa);
+        }
+
+        VERIFICAR_IGUAL(20, descartadas);
+        // Depois de algumas voltas: so uma tentativa a cada 5 min.
+        Enviar(estado, 401);
+        VERIFICAR_IGUAL(300000, estado.intervaloMs);
+
+        // Muitas voltas nao estouram o nivel.
+        for (int i = 0; i < 300; i++)
+            Enviar(estado, 403);
+        VERIFICAR_IGUAL(0xFF, estado.nivelPausa);
+        VERIFICAR_IGUAL(300000, estado.intervaloMs);
+    }
+
+    void TestarOutrasRespostasNaoEncerramPausa()
+    {
+        // Durante a pausa, 400/5xx de uma telemetria liberada nao zeram o
+        // nivel: so 2xx/409 provam a recuperacao.
+        EstadoEnvio estado;
+        IniciarEstadoEnvio(estado);
+        Enviar(estado, 401);
+        Verificar(estado, 200);
+
+        Enviar(estado, 400);
+        VERIFICAR_IGUAL(1, estado.nivelPausa);
+        Enviar(estado, 500);
+        VERIFICAR_IGUAL(1, estado.nivelPausa);
+        Enviar(estado, 401);
+        VERIFICAR_IGUAL(2, estado.nivelPausa);
+        VERIFICAR_IGUAL(60000, estado.intervaloMs);
     }
 
     void TestarSinalizacao()
@@ -281,8 +429,12 @@ int main()
     TestarSequenciaDeFalhas();
     TestarAttemptCount();
     TestarRejeicao();
-    TestarRetryAfter();
-    TestarPausa();
+    TestarInterpretarRetryAfter();
+    TestarRetryAfter429();
+    TestarPausaDescartaSoARejeitada();
+    TestarVerificacaoNaPausa();
+    TestarSemCicloRapidoComVerificacaoEnganosa();
+    TestarOutrasRespostasNaoEncerramPausa();
     TestarSinalizacao();
 
     return teste::Resultado("test_politica_envio");

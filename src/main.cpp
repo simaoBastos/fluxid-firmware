@@ -37,6 +37,37 @@ bool filaDisponivel = false;
 bool sinalizacaoAtiva = false;
 
 
+// Um Retry-After longo e respeitado integralmente; o aviso evita que a
+// espera pareca um travamento. Acima de ~49,7 dias, o temporizador de
+// 32 bits nao representa o valor e a espera fica nesse maximo.
+void AvisarRetryAfterLongo(const RespostaAPI& resposta)
+{
+    if (resposta.codigo != 429)
+        return;
+
+    if (resposta.retry_after_s > RETRY_AFTER_MAXIMO_S)
+    {
+        Serial.print("AVISO: Retry-After de ");
+        Serial.print(resposta.retry_after_s);
+        Serial.println(
+            " s excede o temporizador; aguardando o maximo (~49,7 dias)."
+        );
+    }
+    else if (resposta.retry_after_s > RETRY_AFTER_LONGO_S)
+    {
+        Serial.print("AVISO: Retry-After longo (");
+        Serial.print(resposta.retry_after_s);
+        Serial.println(" s); a espera pedida pela API sera respeitada.");
+    }
+    else if (resposta.retry_after_invalido)
+    {
+        Serial.println(
+            "AVISO: Retry-After ilegivel; aguardando 60 s por seguranca."
+        );
+    }
+}
+
+
 // Reflete nos LEDs uma fila indisponivel ou um envio pausado.
 void AtualizarSinalizacao()
 {
@@ -293,20 +324,20 @@ if (DadosGPSAtualizados())
     if (envioLiberado && estadoEnvio.codigoPausa != 0)
     {
         // Pausa por chave/cadastro: verifica a autorizacao sem reenviar
-        // telemetria e sem apagar nada; so um 200 retoma os envios.
+        // telemetria e sem apagar nada. Um 200 libera uma nova telemetria;
+        // so a aceitacao dela encerra a pausa de vez.
         ResultadoEnvio verificacao = VerificarAutorizacaoAPI();
 
         ultimaTentativaEnvio = millis();
 
-        DecidirAposVerificacao(
-            estadoEnvio,
-            verificacao.codigo,
-            verificacao.retry_after_s
-        );
+        DecidirAposVerificacao(estadoEnvio, verificacao);
+        AvisarRetryAfterLongo(verificacao);
 
         if (estadoEnvio.codigoPausa == 0)
         {
-            Serial.println("Autorizacao confirmada; envios retomados.");
+            Serial.println(
+                "Verificacao respondeu 200; tentando enviar telemetria."
+            );
         }
         else
         {
@@ -332,13 +363,8 @@ if (DadosGPSAtualizados())
             Serial.print("Resposta HTTP: ");
             Serial.println(resultado.codigo);
 
-            DecisaoEnvio decisao = DecidirAposEnvio(
-                estadoEnvio,
-                resultado.acao,
-                resultado.codigo,
-                resultado.retry_after_s,
-                resultado.requisicao_realizada
-            );
+            DecisaoEnvio decisao = DecidirAposEnvio(estadoEnvio, resultado);
+            AvisarRetryAfterLongo(resultado);
 
             // Mesmo message_id e attempt_count + 1, uma vez por tentativa
             // realizada em que a mensagem continua na fila.
@@ -360,7 +386,9 @@ if (DadosGPSAtualizados())
                     break;
 
                 case FILA_DESCARTAR:
-                    // Corpo invalido: reenviar nao resolve; libera a fila.
+                    // 400/413: corpo invalido. 401/403/404: chave ou
+                    // cadastro (secao 7 do Guia). Em ambos, so esta
+                    // mensagem sai; reenviar a mesma nao resolve.
                     if (!DescartarDaFilaOffline(
                             caminho, payload, resultado.codigo))
                     {
@@ -368,23 +396,21 @@ if (DadosGPSAtualizados())
                             "AVISO: nao foi possivel descartar o arquivo."
                         );
                     }
+
+                    if (resultado.acao == ENVIO_PAUSAR)
+                    {
+                        Serial.print(
+                            "Envio pausado; demais mensagens preservadas "
+                            "na fila. Verificacao da chave em (s): "
+                        );
+                        Serial.println(estadoEnvio.intervaloMs / 1000UL);
+                    }
                     break;
 
                 case FILA_MANTER:
-                    if (estadoEnvio.codigoPausa != 0)
-                    {
-                        Serial.print(
-                            "Envio pausado; mensagens preservadas. "
-                            "Verificacao da chave em (s): "
-                        );
-                    }
-                    else
-                    {
-                        Serial.print(
-                            "Mensagem mantida na fila. Proxima tentativa em (s): "
-                        );
-                    }
-
+                    Serial.print(
+                        "Mensagem mantida na fila. Proxima tentativa em (s): "
+                    );
                     Serial.println(estadoEnvio.intervaloMs / 1000UL);
                     break;
             }

@@ -13,8 +13,8 @@ bool ObterProximaDaFilaOffline(
 
 bool RemoverDaFilaOffline(const String& caminho);
 
-// Remove uma mensagem com corpo invalido (HTTP 400 ou 413),
-// registrando o conteudo no serial.
+// Remove uma mensagem rejeitada pela API (HTTP 400, 401, 403, 404 ou
+// 413), registrando o codigo e o conteudo no serial.
 bool DescartarDaFilaOffline(
     const String& caminho,
     const String& payload,

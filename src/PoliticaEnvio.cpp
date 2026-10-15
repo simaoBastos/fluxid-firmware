@@ -13,18 +13,33 @@ namespace
     const uint8_t QTD_VERIFICACOES =
         sizeof(ESPERAS_VERIFICACAO) / sizeof(ESPERAS_VERIFICACAO[0]);
 
-    // Espera pedida pelo servidor, limitada pelo teto de seguranca.
-    // Compara em segundos para nao estourar o uint32_t.
-    uint32_t EsperaRetryAfter(uint32_t segundos)
-    {
-        return segundos > ESPERA_MAXIMA_RETRY_AFTER_MS / 1000UL
-                   ? ESPERA_MAXIMA_RETRY_AFTER_MS
-                   : segundos * 1000UL;
-    }
-
     char Minuscula(char c)
     {
         return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+
+    bool Espaco(char c)
+    {
+        return c == ' ' || c == '\t';
+    }
+
+    // Espera para um 429: o Retry-After valido manda; ilegivel, espera
+    // o teto da espera crescente; ausente, usa a espera padrao.
+    uint32_t EsperaPara429(const RespostaAPI& resposta, uint32_t esperaPadrao)
+    {
+        if (resposta.retry_after_s > 0)
+            return EsperaRetryAfterMs(resposta.retry_after_s);
+
+        if (resposta.retry_after_invalido)
+            return ESPERA_RETRY_AFTER_INVALIDO_MS;
+
+        return esperaPadrao;
+    }
+
+    void SubirNivelPausa(EstadoEnvio& estado)
+    {
+        if (estado.nivelPausa < 0xFF)
+            estado.nivelPausa++;
     }
 }
 
@@ -38,14 +53,23 @@ AcaoAposEnvio ClassificarRespostaHTTP(int codigo)
     if (codigo == 400 || codigo == 413)
         return ENVIO_REJEITADO;
 
-    // Chave ou cadastro: o problema nao e da mensagem. Ela e preservada
-    // e o envio e pausado para nao insistir (secoes 5 e 6 do Guia).
+    // Chave ou cadastro: a secao 7 do Guia manda descartar a mensagem
+    // rejeitada, e as secoes 5 e 6, nao insistir. Descarta so esta
+    // mensagem e pausa o envio das demais.
     if (codigo == 401 || codigo == 403 || codigo == 404)
         return ENVIO_PAUSAR;
 
     // 429 (aguardar Retry-After), 5xx, codigos nao previstos no Guia
     // ou sem resposta (codigo negativo): manter e reenviar.
     return ENVIO_REPETIR;
+}
+
+uint32_t EsperaRetryAfterMs(uint32_t segundos)
+{
+    // Compara em segundos para nao estourar o uint32_t.
+    return segundos > RETRY_AFTER_MAXIMO_S
+               ? 0xFFFFFFFFUL
+               : segundos * 1000UL;
 }
 
 uint32_t EsperaAposFalha(uint8_t falhasSeguidas)
@@ -60,50 +84,64 @@ uint32_t EsperaAposFalha(uint8_t falhasSeguidas)
     return ESPERAS_APOS_FALHA[indice];
 }
 
-uint32_t EsperaVerificacaoPausa(uint8_t verificacoesFeitas)
+uint32_t EsperaVerificacaoPausa(uint8_t nivelPausa)
 {
-    uint8_t indice = verificacoesFeitas >= QTD_VERIFICACOES
+    if (nivelPausa == 0)
+        nivelPausa = 1;
+
+    uint8_t indice = nivelPausa > QTD_VERIFICACOES
                          ? QTD_VERIFICACOES - 1
-                         : verificacoesFeitas;
+                         : nivelPausa - 1;
 
     return ESPERAS_VERIFICACAO[indice];
 }
 
-uint32_t InterpretarRetryAfter(const char* valor)
+bool InterpretarRetryAfter(const char* valor, uint32_t& segundos)
 {
-    if (valor == nullptr)
-        return 0;
+    segundos = 0;
 
-    while (*valor == ' ' || *valor == '\t')
+    if (valor == nullptr)
+        return false;
+
+    while (Espaco(*valor))
         valor++;
 
     if (*valor < '0' || *valor > '9')
-        return 0;
+        return false;
 
-    uint32_t segundos = 0;
+    uint32_t acumulado = 0;
+    bool saturado = false;
 
     while (*valor >= '0' && *valor <= '9')
     {
         uint32_t digito = static_cast<uint32_t>(*valor - '0');
 
-        // Satura em vez de estourar; o teto e aplicado depois.
-        if (segundos > (0xFFFFFFFFUL - digito) / 10UL)
-            return 0xFFFFFFFFUL;
+        // Satura em vez de estourar; o limite e aplicado depois.
+        if (saturado || acumulado > (0xFFFFFFFFUL - digito) / 10UL)
+            saturado = true;
+        else
+            acumulado = acumulado * 10UL + digito;
 
-        segundos = segundos * 10UL + digito;
         valor++;
     }
 
-    while (*valor == ' ' || *valor == '\t')
+    while (Espaco(*valor))
         valor++;
 
     // "120abc" ou uma data HTTP nao sao segundos validos.
-    return *valor == '\0' ? segundos : 0;
+    if (*valor != '\0')
+        return false;
+
+    segundos = saturado ? 0xFFFFFFFFUL : acumulado;
+    return true;
 }
 
-bool ExtrairRetryAfter(const char* linha, uint32_t& segundos)
+bool ExtrairRetryAfter(const char* linha, uint32_t& segundos, bool& valido)
 {
     const char* nome = "retry-after";
+
+    segundos = 0;
+    valido = false;
 
     if (linha == nullptr)
         return false;
@@ -117,38 +155,34 @@ bool ExtrairRetryAfter(const char* linha, uint32_t& segundos)
         nome++;
     }
 
-    while (*linha == ' ' || *linha == '\t')
+    while (Espaco(*linha))
         linha++;
 
     if (*linha != ':')
         return false;
 
-    segundos = InterpretarRetryAfter(linha + 1);
+    valido = InterpretarRetryAfter(linha + 1, segundos);
     return true;
 }
 
 void IniciarEstadoEnvio(EstadoEnvio& estado)
 {
     estado.falhasSeguidas = 0;
-    estado.verificacoesPausa = 0;
+    estado.nivelPausa = 0;
     estado.codigoPausa = 0;
     estado.intervaloMs = INTERVALO_ENVIO_NORMAL_MS;
 }
 
-DecisaoEnvio DecidirAposEnvio(
-    EstadoEnvio& estado,
-    AcaoAposEnvio acao,
-    int codigo,
-    uint32_t retryAfterSegundos,
-    bool requisicaoRealizada)
+DecisaoEnvio DecidirAposEnvio(EstadoEnvio& estado, const RespostaAPI& resposta)
 {
     DecisaoEnvio decisao;
     decisao.fila = FILA_MANTER;
     decisao.registrarTentativa = false;
 
-    switch (acao)
+    switch (ClassificarRespostaHTTP(resposta.codigo))
     {
         case ENVIO_CONFIRMADO:
+            // Telemetria aceita: unica prova de que tudo voltou a funcionar.
             decisao.fila = FILA_REMOVER;
             IniciarEstadoEnvio(estado);
             break;
@@ -160,53 +194,60 @@ DecisaoEnvio DecidirAposEnvio(
             break;
 
         case ENVIO_PAUSAR:
-            // Mesmo message_id; +1 porque uma tentativa foi realizada.
-            decisao.registrarTentativa = requisicaoRealizada;
-            estado.codigoPausa = codigo;
-            estado.verificacoesPausa = 0;
+            // Secao 7: descarta so a mensagem rejeitada. As demais ficam
+            // na fila ate a verificacao periodica liberar o envio.
+            decisao.fila = FILA_DESCARTAR;
+            SubirNivelPausa(estado);
+            estado.codigoPausa = resposta.codigo;
             estado.falhasSeguidas = 0;
-            estado.intervaloMs = EsperaVerificacaoPausa(0);
+            estado.intervaloMs = EsperaVerificacaoPausa(estado.nivelPausa);
             break;
 
         case ENVIO_REPETIR:
-            decisao.registrarTentativa = requisicaoRealizada;
+            // Mesmo message_id; +1 so se uma tentativa foi transmitida.
+            decisao.registrarTentativa = resposta.requisicao_realizada;
 
             if (estado.falhasSeguidas < 0xFF)
                 estado.falhasSeguidas++;
 
-            estado.intervaloMs =
-                (codigo == 429 && retryAfterSegundos > 0)
-                    ? EsperaRetryAfter(retryAfterSegundos)
-                    : EsperaAposFalha(estado.falhasSeguidas);
+            {
+                uint32_t padrao = EsperaAposFalha(estado.falhasSeguidas);
+
+                estado.intervaloMs =
+                    resposta.codigo == 429
+                        ? EsperaPara429(resposta, padrao)
+                        : padrao;
+            }
             break;
     }
 
     return decisao;
 }
 
-void DecidirAposVerificacao(
-    EstadoEnvio& estado,
-    int codigo,
-    uint32_t retryAfterSegundos)
+void DecidirAposVerificacao(EstadoEnvio& estado, const RespostaAPI& resposta)
 {
     // GET /iot/commands/{device_id} responde 200 quando a chave e o
-    // cadastro estao validos (Regras-de-Negocio-e-Banco-Oxide).
-    if (codigo == 200)
+    // cadastro estao validos (Regras-de-Negocio-e-Banco-Oxide). Isso
+    // libera uma nova telemetria, mas nao zera o nivel da pausa: se a
+    // telemetria for rejeitada de novo, a proxima espera e maior.
+    if (resposta.codigo == 200)
     {
-        IniciarEstadoEnvio(estado);
+        estado.codigoPausa = 0;
+        estado.falhasSeguidas = 0;
+        estado.intervaloMs = INTERVALO_ENVIO_NORMAL_MS;
         return;
     }
 
-    if (codigo == 401 || codigo == 403 || codigo == 404)
-        estado.codigoPausa = codigo;
+    if (resposta.codigo == 401 || resposta.codigo == 403 ||
+        resposta.codigo == 404)
+        estado.codigoPausa = resposta.codigo;
 
-    if (estado.verificacoesPausa < 0xFF)
-        estado.verificacoesPausa++;
+    SubirNivelPausa(estado);
+
+    uint32_t padrao = EsperaVerificacaoPausa(estado.nivelPausa);
 
     estado.intervaloMs =
-        (codigo == 429 && retryAfterSegundos > 0)
-            ? EsperaRetryAfter(retryAfterSegundos)
-            : EsperaVerificacaoPausa(estado.verificacoesPausa);
+        resposta.codigo == 429 ? EsperaPara429(resposta, padrao) : padrao;
 }
 
 EstadoDispositivo CalcularEstadoSinalizado(

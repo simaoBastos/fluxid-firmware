@@ -93,6 +93,7 @@ namespace
         bool endOfHeadersReached() { return http.endOfHeadersReached(); }
         int available() { return http.available(); }
         int readHeader() { return http.readHeader(); }
+        bool conectado() { return http.connected(); }
         void esperar() { delay(1); }
     };
 
@@ -110,6 +111,7 @@ namespace
     {
         ResultadoEnvio resultado;
         resultado.retry_after_s = 0;
+        resultado.retry_after_invalido = false;
         resultado.requisicao_realizada = true;
 
         HttpClient http(cliente, endereco.host.c_str(), endereco.porta);
@@ -159,12 +161,16 @@ namespace
                 LerCabecalhosHTTP(leitor, Agora, TIMEOUT_CABECALHOS_MS);
 
             resultado.retry_after_s = cabecalhos.retry_after_s;
+            resultado.retry_after_invalido = cabecalhos.retry_after_invalido;
 
             // Consome o corpo da resposta antes de encerrar a conexão.
             if (cabecalhos.completos)
                 resposta = http.responseBody();
             else
-                Serial.println("AVISO: cabecalhos HTTP incompletos (timeout).");
+                Serial.println(
+                    "AVISO: cabecalhos HTTP incompletos "
+                    "(tempo esgotado ou conexao encerrada); corpo ignorado."
+                );
         }
 
         Serial.print("HTTP status: ");
@@ -181,6 +187,10 @@ namespace
             Serial.print("Retry-After (s): ");
             Serial.println(resultado.retry_after_s);
         }
+        else if (resultado.retry_after_invalido)
+        {
+            Serial.println("AVISO: Retry-After presente, mas ilegivel.");
+        }
 
         http.stop();
         return resultado;
@@ -191,6 +201,7 @@ namespace
         ResultadoEnvio resultado;
         resultado.codigo = -1;
         resultado.retry_after_s = 0;
+        resultado.retry_after_invalido = false;
         resultado.requisicao_realizada = false;
         resultado.acao = ENVIO_REPETIR;
         return resultado;
@@ -277,8 +288,10 @@ ResultadoEnvio EnviarDadosTelemetria(const String& payload)
         case ENVIO_PAUSAR:
             Serial.println(
                 resultado.codigo == 404
-                    ? "Dispositivo nao cadastrado na API."
-                    : "Chave recusada ou dispositivo desativado."
+                    ? "Dispositivo nao cadastrado na API (HTTP 404)."
+                    : resultado.codigo == 403
+                        ? "Chave de outro dispositivo ou dispositivo desativado (HTTP 403)."
+                        : "Chave ausente ou invalida (HTTP 401)."
             );
             break;
 

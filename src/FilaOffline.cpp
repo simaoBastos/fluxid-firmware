@@ -350,8 +350,9 @@ bool DescartarDaFilaOffline(
     const String& payload,
     int codigoHTTP)
 {
-    // Corpo invalido (400/413): o Guia manda registrar e descartar.
-    // O conteudo vai para o serial para permitir a analise do erro.
+    // Rejeitada pela API (400/413: corpo invalido; 401/403/404: chave ou
+    // cadastro). O Guia (secao 7) manda registrar e descartar; o
+    // conteudo vai para o serial para permitir a analise do erro.
     Serial.print("Telemetria descartada (HTTP ");
     Serial.print(codigoHTTP);
     Serial.print("): ");

@@ -4,11 +4,9 @@
 
 #include <PoliticaEnvio.h>
 
-struct ResultadoEnvio
+// Resposta da API (PoliticaEnvio.h) e a acao correspondente.
+struct ResultadoEnvio : RespostaAPI
 {
-    int codigo;                  // status HTTP, ou negativo sem resposta
-    uint32_t retry_after_s;      // valor do cabecalho Retry-After (0 se ausente)
-    bool requisicao_realizada;   // false se nada foi transmitido (sem Wi-Fi, URL invalida)
     AcaoAposEnvio acao;
 };
 
